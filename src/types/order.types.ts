@@ -5,11 +5,31 @@ export interface CartItem {
   cantidad: number
 }
 
-export type OrderStatus = 'pending' | 'approved' | 'rejected' | 'cancelled'
+export type OrderStatus =
+  | 'pending'
+  | 'approved'
+  | 'preparing'
+  | 'ready'
+  | 'delivered'
+  | 'rejected'
+  | 'cancelled'
+
+export interface AdminNote {
+  text: string
+  createdAt: Date
+}
 
 export interface PrepareRequest {
   items: CartItem[]
   clientTransactionId: string
+  customerEmail: string
+}
+
+export interface TrackOrderResponse {
+  status: OrderStatus
+  items: CartItem[]
+  total: number
+  createdAt: Date
 }
 
 export interface PrepareResponse {

@@ -11,6 +11,7 @@ const whitelist = [
   "http://localhost:5174",
   "http://localhost:8101",
   "https://tequecrunchesse.netlify.app",
+  "https://testing-storybrand-frontend.bakano.ec"
 ];
 
 const corsOptions: cors.CorsOptions = {
