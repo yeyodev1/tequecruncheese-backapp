@@ -26,6 +26,26 @@ const ALLOWED_STATUSES: OrderStatus[] = [
   'pending', 'approved', 'preparing', 'ready', 'delivered', 'rejected', 'cancelled',
 ]
 
+export async function ordersByEmail(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { email } = req.query as { email?: string }
+    if (!email || !email.includes('@')) {
+      throw new CustomError('Valid email is required', 400)
+    }
+    const orders = await Order.find({
+      customerEmail: { $regex: `^${email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+      status: { $nin: ['pending'] },
+    })
+      .select('status items total createdAt trackingToken updatedAt')
+      .sort({ createdAt: -1 })
+      .limit(20)
+
+    res.json(orders)
+  } catch (err) {
+    next(err)
+  }
+}
+
 export async function listOrders(req: Request, res: Response, next: NextFunction) {
   try {
     const { status } = req.query as { status?: string }
