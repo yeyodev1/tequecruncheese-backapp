@@ -27,6 +27,9 @@ export interface CustomerInfo {
   barrio?: string
   referencia?: string
   mapsUrl?: string
+  quiereFactura?: boolean
+  facturaEmail?: string
+  facturaRuc?: string
 }
 
 export interface PrepareRequest {
@@ -34,6 +37,7 @@ export interface PrepareRequest {
   clientTransactionId: string
   customerEmail: string
   customerInfo?: CustomerInfo
+  deliveryCost?: number
 }
 
 export interface TrackOrderResponse {

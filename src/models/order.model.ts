@@ -23,6 +23,10 @@ export interface IOrder extends Document {
   userId?: mongoose.Types.ObjectId
   deliveryAddress?: IDeliveryAddress
   cedula?: string
+  quiereFactura?: boolean
+  facturaEmail?: string
+  facturaRuc?: string
+  deliveryCost?: number
   createdAt: Date
   updatedAt: Date
 }
@@ -70,6 +74,10 @@ const OrderSchema = new Schema<IOrder>(
       ),
     },
     cedula: { type: String, match: /^\d{10}$/ },
+    quiereFactura: { type: Boolean, default: false },
+    facturaEmail:  { type: String },
+    facturaRuc:    { type: String, match: /^(\d{10}|\d{13})$/ },
+    deliveryCost:  { type: Number, default: 0 },
   },
   { timestamps: true },
 )

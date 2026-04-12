@@ -31,7 +31,8 @@ async function linkOrCreateUser(customerEmail: string, order: InstanceType<typeo
 export async function createOrderAndPrepare(body: PrepareRequest) {
   const { items, clientTransactionId, customerEmail } = body
 
-  const total = items.reduce((sum, item) => sum + item.precio * item.cantidad, 0)
+  const itemsTotal = items.reduce((sum, item) => sum + item.precio * item.cantidad, 0)
+  const total = itemsTotal + (body.deliveryCost ?? 0)
   const amountCentavos = Math.round(total * 100)
 
   const existing = await Order.findOne({ clientTransactionId })
@@ -52,6 +53,10 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
       referencia: customerInfo.referencia,
       mapsUrl:    customerInfo.mapsUrl,
     } : undefined,
+    quiereFactura: customerInfo?.quiereFactura,
+    facturaEmail:  customerInfo?.facturaEmail,
+    facturaRuc:    customerInfo?.facturaRuc,
+    deliveryCost:  body.deliveryCost ?? 0,
     trackingToken,
     items,
     total,
