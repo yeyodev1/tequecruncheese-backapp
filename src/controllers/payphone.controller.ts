@@ -4,14 +4,14 @@ import { CustomError } from '../errors/customError.error'
 
 export async function prepare(req: Request, res: Response, next: NextFunction) {
   try {
-    const { items, clientTransactionId, customerEmail, customerInfo } = req.body
+    const { items, clientTransactionId, customerEmail, customerInfo, deliveryCost } = req.body
     if (!items?.length || !clientTransactionId) {
       throw new CustomError('items and clientTransactionId are required', 400)
     }
     if (!customerEmail || typeof customerEmail !== 'string' || !customerEmail.includes('@')) {
       throw new CustomError('customerEmail is required', 400)
     }
-    const result = await orderService.createOrderAndPrepare({ items, clientTransactionId, customerEmail, customerInfo })
+    const result = await orderService.createOrderAndPrepare({ items, clientTransactionId, customerEmail, customerInfo, deliveryCost })
     res.status(200).json(result)
   } catch (err) {
     next(err)
