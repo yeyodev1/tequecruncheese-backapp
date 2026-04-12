@@ -3,10 +3,11 @@ import type { CartItem } from '../types/order.types'
 
 const resend = new Resend(process.env.RESEND_KEY)
 
-// Use onboarding@resend.dev for testing (no domain verification needed).
-// For production: verify your domain at resend.com/domains and change to:
-// 'Tequecruncheese <noreply@tequecruncheese.com>'
-const FROM_EMAIL = process.env.EMAIL_FROM ?? 'Tequecruncheese <onboarding@resend.dev>'
+// Usar una dirección real (pedidos@tequecruncheese.com) — NO noreply, mejora entregabilidad
+const FROM_EMAIL = process.env.EMAIL_FROM ?? 'Tequecruncheese <pedidos@tequecruncheese.com>'
+// Correo del equipo que recibe notificaciones internas
+const TEAM_EMAIL = process.env.TEAM_EMAIL ?? 'pedidos@tequecruncheese.com'
+
 const ACCENT_COLOR = '#2d1b00'
 const PRIMARY_COLOR = '#fed47f'
 
@@ -178,5 +179,226 @@ export async function sendPaymentRejectedEmail(params: { to: string }): Promise<
     console.log('[email] sendPaymentRejectedEmail sent:', result)
   } catch (err) {
     console.error('[email] sendPaymentRejectedEmail failed:', err)
+  }
+}
+
+export async function sendGuestAccountCreatedEmail(to: string, name: string, tempPassword: string): Promise<void> {
+  const loginUrl = `${process.env.FRONTEND_URL}/login`
+
+  const content = `
+    <h2 style="margin:0 0 8px;color:${ACCENT_COLOR};font-size:20px;font-weight:800;">¡Te creamos una cuenta!</h2>
+    <p style="margin:0 0 20px;color:#555;font-size:15px;line-height:1.6;">
+      Hola <strong>${name}</strong>, compraste y te creamos una cuenta automáticamente para que puedas hacer seguimiento de tus pedidos.
+    </p>
+    <div style="background:#f9f5ee;border-radius:8px;padding:16px 20px;margin:0 0 24px;">
+      <p style="margin:0 0 8px;font-size:13px;color:#777;">Tu contraseña es tu correo electrónico:</p>
+      <p style="margin:0;font-size:16px;font-weight:800;color:${ACCENT_COLOR};letter-spacing:1px;">${tempPassword}</p>
+    </div>
+    <p style="margin:0 0 20px;color:#555;font-size:14px;line-height:1.6;">
+      Puedes cambiarla en tu perfil una vez que ingreses.
+    </p>
+    <div style="text-align:center;margin:0 0 8px;">
+      <a href="${loginUrl}"
+         style="display:inline-block;background:${ACCENT_COLOR};color:${PRIMARY_COLOR};text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:15px;">
+        Iniciar sesión
+      </a>
+    </div>`
+
+  try {
+    const result = await resend.emails.send({
+      from: FROM_EMAIL,
+      to,
+      subject: 'Tequecruncheese · Tu cuenta ha sido creada',
+      html: buildEmailWrapper(content),
+    })
+    console.log('[email] sendGuestAccountCreatedEmail sent:', result)
+  } catch (err) {
+    console.error('[email] sendGuestAccountCreatedEmail failed:', err)
+  }
+}
+
+export async function sendPasswordResetEmail(to: string, resetToken: string): Promise<void> {
+  const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`
+
+  const content = `
+    <h2 style="margin:0 0 8px;color:${ACCENT_COLOR};font-size:20px;font-weight:800;">Recupera tu contraseña</h2>
+    <p style="margin:0 0 20px;color:#555;font-size:15px;line-height:1.6;">
+      Recibimos una solicitud para restablecer la contraseña de tu cuenta. Haz clic en el botón para crear una nueva contraseña.
+    </p>
+    <p style="margin:0 0 20px;color:#777;font-size:13px;">
+      Este enlace expira en 1 hora. Si no solicitaste este cambio, puedes ignorar este correo.
+    </p>
+    <div style="text-align:center;margin:0 0 8px;">
+      <a href="${resetUrl}"
+         style="display:inline-block;background:${ACCENT_COLOR};color:${PRIMARY_COLOR};text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:15px;">
+        Restablecer contraseña
+      </a>
+    </div>`
+
+  try {
+    const result = await resend.emails.send({
+      from: FROM_EMAIL,
+      to,
+      subject: 'Tequecruncheese · Recupera tu contraseña',
+      html: buildEmailWrapper(content),
+    })
+    console.log('[email] sendPasswordResetEmail sent:', result)
+  } catch (err) {
+    console.error('[email] sendPasswordResetEmail failed:', err)
+  }
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  approved: 'Pago confirmado',
+  preparing: 'En preparación',
+  ready: 'Listo para entregar',
+  delivered: 'Entregado',
+}
+
+export async function sendOrderStatusUpdateEmail(to: string, orderStatus: string, trackingToken: string): Promise<void> {
+  const trackingUrl = `${process.env.FRONTEND_URL}/pedido/${trackingToken}`
+  const statusLabel = STATUS_LABELS[orderStatus] ?? orderStatus
+
+  const content = `
+    <h2 style="margin:0 0 8px;color:${ACCENT_COLOR};font-size:20px;font-weight:800;">Tu pedido fue actualizado</h2>
+    <p style="margin:0 0 20px;color:#555;font-size:15px;line-height:1.6;">
+      El estado de tu pedido cambió a:
+    </p>
+    <div style="background:#f9f5ee;border-radius:8px;padding:16px 20px;margin:0 0 24px;text-align:center;">
+      <p style="margin:0;font-size:18px;font-weight:800;color:${ACCENT_COLOR};">${statusLabel}</p>
+    </div>
+    <div style="text-align:center;margin:0 0 8px;">
+      <a href="${trackingUrl}"
+         style="display:inline-block;background:${ACCENT_COLOR};color:${PRIMARY_COLOR};text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:15px;">
+        Ver mi pedido
+      </a>
+    </div>`
+
+  try {
+    const result = await resend.emails.send({
+      from: FROM_EMAIL,
+      to,
+      subject: 'Tequecruncheese · Tu pedido fue actualizado',
+      html: buildEmailWrapper(content),
+    })
+    console.log('[email] sendOrderStatusUpdateEmail sent:', result)
+  } catch (err) {
+    console.error('[email] sendOrderStatusUpdateEmail failed:', err)
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTIFICACIONES INTERNAS AL EQUIPO
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Notifica al equipo cuando llega un pedido nuevo (pago pendiente).
+ * Se envía desde el mismo pedidos@ para que el equipo pueda responder si es necesario.
+ */
+export async function sendNewOrderAlertToTeam(params: {
+  customerEmail: string
+  customerName?: string
+  items: CartItem[]
+  total: number
+  trackingToken: string
+  orderId: string
+}): Promise<void> {
+  const { customerEmail, customerName, items, total, trackingToken, orderId } = params
+  const adminUrl = `${process.env.FRONTEND_URL}/admin/dashboard`
+  const trackingUrl = `${process.env.FRONTEND_URL}/pedido/${trackingToken}`
+  const displayName = customerName ?? customerEmail
+
+  const content = `
+    <h2 style="margin:0 0 4px;color:${ACCENT_COLOR};font-size:20px;font-weight:800;">
+      🛒 Nuevo pedido recibido
+    </h2>
+    <p style="margin:0 0 20px;color:#777;font-size:13px;">ID: ${orderId}</p>
+
+    <div style="background:#f9f5ee;border-radius:8px;padding:14px 18px;margin:0 0 20px;">
+      <p style="margin:0 0 4px;font-size:13px;color:#777;">Cliente</p>
+      <p style="margin:0;font-size:15px;font-weight:700;color:${ACCENT_COLOR};">${displayName}</p>
+      <p style="margin:2px 0 0;font-size:13px;color:#555;">${customerEmail}</p>
+    </div>
+
+    ${buildItemsTable(items)}
+
+    <div style="text-align:right;margin:8px 0 24px;font-size:16px;color:${ACCENT_COLOR};font-weight:800;">
+      Total: $${total.toFixed(2)}
+    </div>
+
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:0 0 8px;">
+      <a href="${adminUrl}"
+         style="display:inline-block;background:${ACCENT_COLOR};color:${PRIMARY_COLOR};text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:700;font-size:14px;">
+        Ver en Admin
+      </a>
+      <a href="${trackingUrl}"
+         style="display:inline-block;background:#f9f5ee;color:${ACCENT_COLOR};text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:700;font-size:14px;border:1px solid ${ACCENT_COLOR};">
+        Ver tracking
+      </a>
+    </div>`
+
+  try {
+    const result = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: TEAM_EMAIL,
+      subject: `🛒 Nuevo pedido — $${total.toFixed(2)} — ${displayName}`,
+      html: buildEmailWrapper(content),
+    })
+    console.log('[email] sendNewOrderAlertToTeam sent:', result)
+  } catch (err) {
+    console.error('[email] sendNewOrderAlertToTeam failed:', err)
+  }
+}
+
+/**
+ * Notifica al equipo cuando un pago fue CONFIRMADO (aprobado por Payphone).
+ */
+export async function sendPaymentConfirmedAlertToTeam(params: {
+  customerEmail: string
+  items: CartItem[]
+  total: number
+  trackingToken: string
+  orderId: string
+}): Promise<void> {
+  const { customerEmail, items, total, trackingToken, orderId } = params
+  const adminUrl = `${process.env.FRONTEND_URL}/admin/dashboard`
+
+  const content = `
+    <div style="text-align:center;margin-bottom:20px;">
+      <span style="font-size:40px;">✅</span>
+    </div>
+    <h2 style="margin:0 0 4px;color:#2f855a;font-size:20px;font-weight:800;text-align:center;">
+      Pago confirmado
+    </h2>
+    <p style="margin:0 0 20px;color:#777;font-size:13px;text-align:center;">ID: ${orderId}</p>
+
+    <div style="background:#f0fff4;border-radius:8px;padding:14px 18px;margin:0 0 20px;">
+      <p style="margin:0 0 4px;font-size:13px;color:#777;">Cliente</p>
+      <p style="margin:0;font-size:15px;font-weight:700;color:#22543d;">${customerEmail}</p>
+    </div>
+
+    ${buildItemsTable(items)}
+
+    <div style="text-align:right;margin:8px 0 24px;font-size:16px;color:${ACCENT_COLOR};font-weight:800;">
+      Total pagado: $${total.toFixed(2)}
+    </div>
+
+    <div style="text-align:center;margin:0 0 8px;">
+      <a href="${adminUrl}"
+         style="display:inline-block;background:${ACCENT_COLOR};color:${PRIMARY_COLOR};text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:15px;">
+        Gestionar pedido en Admin
+      </a>
+    </div>`
+
+  try {
+    const result = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: TEAM_EMAIL,
+      subject: `✅ Pago confirmado — $${total.toFixed(2)} — ${customerEmail}`,
+      html: buildEmailWrapper(content),
+    })
+    console.log('[email] sendPaymentConfirmedAlertToTeam sent:', result)
+  } catch (err) {
+    console.error('[email] sendPaymentConfirmedAlertToTeam failed:', err)
   }
 }

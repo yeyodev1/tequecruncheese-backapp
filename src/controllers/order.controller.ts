@@ -1,7 +1,9 @@
 import { Request, Response, NextFunction } from 'express'
+import mongoose from 'mongoose'
 import { Order } from '../models/order.model'
 import { CustomError } from '../errors/customError.error'
 import type { OrderStatus } from '../types/order.types'
+import { AuthRequest } from '../types/AuthRequest'
 
 export async function trackOrder(req: Request, res: Response, next: NextFunction) {
   try {
@@ -40,6 +42,20 @@ export async function ordersByEmail(req: Request, res: Response, next: NextFunct
       .sort({ createdAt: -1 })
       .limit(20)
 
+    res.json(orders)
+  } catch (err) {
+    next(err)
+  }
+}
+
+// GET /api/orders/my-orders (auth required)
+export async function myOrders(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const userId = req.user!.id
+    const orders = await Order.find({ userId: new mongoose.Types.ObjectId(userId) })
+      .select('status items total createdAt trackingToken updatedAt')
+      .sort({ createdAt: -1 })
+      .limit(50)
     res.json(orders)
   } catch (err) {
     next(err)

@@ -3,6 +3,9 @@ import jwt from 'jsonwebtoken'
 import { Order } from '../models/order.model'
 import { CustomError } from '../errors/customError.error'
 import type { OrderStatus } from '../types/order.types'
+import * as emailService from '../services/email.service'
+
+const STATUS_UPDATE_EMAIL_TRIGGERS: OrderStatus[] = ['approved', 'preparing', 'ready', 'delivered']
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? 'admin@tequecruncheese.com'
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? '123456789'
@@ -88,6 +91,11 @@ export async function updateStatus(req: Request, res: Response, next: NextFuncti
     }
     order.status = status
     await order.save()
+
+    if (STATUS_UPDATE_EMAIL_TRIGGERS.includes(status as OrderStatus)) {
+      void emailService.sendOrderStatusUpdateEmail(order.customerEmail, status, order.trackingToken)
+    }
+
     res.json(order)
   } catch (err) {
     next(err)

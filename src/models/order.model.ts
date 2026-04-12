@@ -1,6 +1,13 @@
 import mongoose, { Schema, Document } from 'mongoose'
 import type { CartItem, OrderStatus, AdminNote } from '../types/order.types'
 
+export interface IDeliveryAddress {
+  calle: string
+  barrio?: string
+  referencia?: string
+  mapsUrl?: string
+}
+
 export interface IOrder extends Document {
   clientTransactionId: string
   payphoneTransactionId?: string
@@ -10,6 +17,9 @@ export interface IOrder extends Document {
   total: number
   status: OrderStatus
   adminNotes: AdminNote[]
+  userId?: mongoose.Types.ObjectId
+  deliveryAddress?: IDeliveryAddress
+  cedula?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -41,6 +51,19 @@ const OrderSchema = new Schema<IOrder>(
       type: [{ text: String, createdAt: { type: Date, default: Date.now } }],
       default: [],
     },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    deliveryAddress: {
+      type: new Schema<IDeliveryAddress>(
+        {
+          calle: { type: String, required: true },
+          barrio: { type: String },
+          referencia: { type: String },
+          mapsUrl: { type: String },
+        },
+        { _id: false },
+      ),
+    },
+    cedula: { type: String, match: /^\d{10}$/ },
   },
   { timestamps: true },
 )

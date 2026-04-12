@@ -1,9 +1,32 @@
 import { randomUUID } from 'crypto'
 import { Order } from '../models/order.model'
+import { User } from '../models/user.model'
 import * as payphoneService from './payphone.service'
 import * as emailService from './email.service'
 import { CustomError } from '../errors/customError.error'
 import type { PrepareRequest, ConfirmRequest } from '../types/order.types'
+
+async function linkOrCreateUser(customerEmail: string, order: InstanceType<typeof Order>): Promise<void> {
+  try {
+    const existingUser = await User.findOne({ email: customerEmail.toLowerCase() })
+    if (existingUser) {
+      order.userId = existingUser._id as import('mongoose').Types.ObjectId
+    } else {
+      // Default password is the customer's email address
+      const newUser = await User.create({
+        name: customerEmail.split('@')[0],
+        email: customerEmail.toLowerCase(),
+        password: customerEmail,
+        role: 'customer',
+      })
+      order.userId = newUser._id as import('mongoose').Types.ObjectId
+      await emailService.sendGuestAccountCreatedEmail(customerEmail, newUser.name, customerEmail)
+    }
+    await order.save()
+  } catch (err) {
+    console.error('[order.service] linkOrCreateUser failed:', err)
+  }
+}
 
 export async function createOrderAndPrepare(body: PrepareRequest) {
   const { items, clientTransactionId, customerEmail } = body
@@ -25,6 +48,9 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
     status: 'pending',
   })
 
+  // Link or create user account (non-blocking — failures logged, not thrown)
+  void linkOrCreateUser(customerEmail, order)
+
   try {
     const result = await payphoneService.preparePurchase({
       amount: amountCentavos,
@@ -37,7 +63,16 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
       reference: `TQC-${order._id}`,
     })
 
-    await emailService.sendOrderPendingEmail({ to: customerEmail, items, total, trackingToken })
+    // Email al cliente: pedido recibido, procesando pago
+    void emailService.sendOrderPendingEmail({ to: customerEmail, items, total, trackingToken })
+    // Alerta interna al equipo: nuevo pedido entrante
+    void emailService.sendNewOrderAlertToTeam({
+      customerEmail,
+      items,
+      total,
+      trackingToken,
+      orderId: String(order._id),
+    })
 
     return { payWithPayPhone: result.payWithPayPhone }
   } catch (err) {
@@ -74,14 +109,23 @@ export async function confirmOrder(body: ConfirmRequest) {
   await order.save()
 
   if (newStatus === 'approved') {
-    await emailService.sendPaymentApprovedEmail({
+    // Email al cliente: pago aprobado
+    void emailService.sendPaymentApprovedEmail({
       to: order.customerEmail,
       items: order.items,
       total: order.total,
       trackingToken: order.trackingToken,
     })
+    // Alerta interna al equipo: pago confirmado, preparar pedido
+    void emailService.sendPaymentConfirmedAlertToTeam({
+      customerEmail: order.customerEmail,
+      items: order.items,
+      total: order.total,
+      trackingToken: order.trackingToken,
+      orderId: String(order._id),
+    })
   } else {
-    await emailService.sendPaymentRejectedEmail({ to: order.customerEmail })
+    void emailService.sendPaymentRejectedEmail({ to: order.customerEmail })
   }
 
   return {

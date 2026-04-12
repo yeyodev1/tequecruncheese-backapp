@@ -2,7 +2,7 @@ import { Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { AuthRequest, JwtPayload } from "../types/AuthRequest";
 
-export function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
+export function verifyToken(req: AuthRequest, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -16,8 +16,19 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
     const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as JwtPayload;
     req.user = decoded;
     next();
-  } catch (error) {
+  } catch {
     res.status(401).json({ message: "Invalid or expired token" });
     return;
   }
 }
+
+export function requireAdmin(req: AuthRequest, res: Response, next: NextFunction): void {
+  if (!req.user || req.user.role !== 'admin') {
+    res.status(403).json({ message: "Admin access required" });
+    return;
+  }
+  next();
+}
+
+// Keep backward compatibility alias
+export { verifyToken as authMiddleware };
