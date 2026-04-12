@@ -39,9 +39,19 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
 
   const trackingToken = randomUUID()
 
+  const { customerInfo } = body
   const order = await Order.create({
     clientTransactionId,
     customerEmail,
+    customerName:  customerInfo?.nombre,
+    customerPhone: customerInfo?.telefono,
+    cedula:        customerInfo?.cedula,
+    deliveryAddress: customerInfo?.calle ? {
+      calle:      customerInfo.calle,
+      barrio:     customerInfo.barrio,
+      referencia: customerInfo.referencia,
+      mapsUrl:    customerInfo.mapsUrl,
+    } : undefined,
     trackingToken,
     items,
     total,
@@ -62,6 +72,10 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
       storeId: process.env.PAYPHONE_STORE_ID!,
       reference: `TQC-${order._id}`,
     })
+
+    // Persist the payment URL so customers can retry from their order history
+    order.payWithPayPhone = result.payWithPayPhone
+    await order.save()
 
     // Email al cliente: pedido recibido, procesando pago
     void emailService.sendOrderPendingEmail({ to: customerEmail, items, total, trackingToken })

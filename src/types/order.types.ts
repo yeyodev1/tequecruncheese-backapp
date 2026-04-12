@@ -19,10 +19,21 @@ export interface AdminNote {
   createdAt: Date
 }
 
+export interface CustomerInfo {
+  nombre?: string
+  telefono?: string
+  cedula?: string
+  calle?: string
+  barrio?: string
+  referencia?: string
+  mapsUrl?: string
+}
+
 export interface PrepareRequest {
   items: CartItem[]
   clientTransactionId: string
   customerEmail: string
+  customerInfo?: CustomerInfo
 }
 
 export interface TrackOrderResponse {

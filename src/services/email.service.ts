@@ -248,29 +248,87 @@ export async function sendPasswordResetEmail(to: string, resetToken: string): Pr
   }
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  approved: 'Pago confirmado',
-  preparing: 'En preparación',
-  ready: 'Listo para entregar',
-  delivered: 'Entregado',
+const STATUS_EMAIL_CONFIG: Record<string, {
+  emoji: string
+  headline: string
+  body: string
+  accentColor: string
+  subject: string
+}> = {
+  approved: {
+    emoji: '✅',
+    headline: '¡Tu pago fue confirmado!',
+    body: 'Hemos recibido tu pago correctamente. Tu pedido ya está en nuestra cola y pronto comenzaremos a prepararlo. ¡Gracias por tu confianza!',
+    accentColor: '#2f855a',
+    subject: '¡Tu pago fue confirmado!',
+  },
+  preparing: {
+    emoji: '🧀',
+    headline: '¡Estamos preparando tu pedido!',
+    body: 'Nuestros maestros tequeñeros están trabajando con todo el amor en tu pedido. ¡Ya huele delicioso! En breve estará listo.',
+    accentColor: '#c05621',
+    subject: 'Tu pedido está en preparación',
+  },
+  ready: {
+    emoji: '📦',
+    headline: '¡Tu pedido está listo!',
+    body: 'Tus tequeños están listos y calentitos, esperando por ti. En breve recibirás la entrega o puedes pasar a recogerlo.',
+    accentColor: '#553c9a',
+    subject: '¡Tu pedido está listo para entregar!',
+  },
+  delivered: {
+    emoji: '🚀',
+    headline: '¡Tu pedido fue entregado!',
+    body: '¡Disfruta tus tequeños! Esperamos que estén deliciosos. Gracias por confiar en Tequecruncheese. 🧡 ¡Hasta la próxima!',
+    accentColor: '#276749',
+    subject: '¡Tu pedido fue entregado!',
+  },
+  cancelled: {
+    emoji: '❌',
+    headline: 'Tu pedido fue cancelado',
+    body: 'Lamentamos informarte que tu pedido fue cancelado. Si tienes alguna duda o necesitas ayuda, no dudes en contactarnos. Estaremos felices de asistirte.',
+    accentColor: '#c53030',
+    subject: 'Tu pedido fue cancelado',
+  },
+  rejected: {
+    emoji: '⚠️',
+    headline: 'Hubo un problema con tu pedido',
+    body: 'Lo sentimos, hubo un inconveniente con tu pedido. Por favor contáctanos para que podamos ayudarte lo antes posible.',
+    accentColor: '#c05621',
+    subject: 'Información sobre tu pedido',
+  },
 }
 
-export async function sendOrderStatusUpdateEmail(to: string, orderStatus: string, trackingToken: string): Promise<void> {
+export async function sendOrderStatusUpdateEmail(
+  to: string,
+  orderStatus: string,
+  trackingToken: string,
+  note?: string,
+): Promise<void> {
   const trackingUrl = `${process.env.FRONTEND_URL}/pedido/${trackingToken}`
-  const statusLabel = STATUS_LABELS[orderStatus] ?? orderStatus
+  const cfg = STATUS_EMAIL_CONFIG[orderStatus]
+  if (!cfg) return // unknown status — skip silently
+
+  const noteBlock = note?.trim()
+    ? `<div style="background:#fff8e6;border-left:4px solid ${cfg.accentColor};border-radius:0 8px 8px 0;padding:14px 18px;margin:0 0 24px;">
+        <p style="margin:0 0 4px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:${cfg.accentColor};">Mensaje del equipo</p>
+        <p style="margin:0;font-size:14px;color:#333;line-height:1.6;white-space:pre-wrap;">${note.trim().replace(/\n/g, '<br>')}</p>
+       </div>`
+    : ''
 
   const content = `
-    <h2 style="margin:0 0 8px;color:${ACCENT_COLOR};font-size:20px;font-weight:800;">Tu pedido fue actualizado</h2>
-    <p style="margin:0 0 20px;color:#555;font-size:15px;line-height:1.6;">
-      El estado de tu pedido cambió a:
-    </p>
-    <div style="background:#f9f5ee;border-radius:8px;padding:16px 20px;margin:0 0 24px;text-align:center;">
-      <p style="margin:0;font-size:18px;font-weight:800;color:${ACCENT_COLOR};">${statusLabel}</p>
+    <div style="text-align:center;margin-bottom:20px;">
+      <span style="font-size:48px;">${cfg.emoji}</span>
     </div>
+    <h2 style="margin:0 0 12px;color:${cfg.accentColor};font-size:20px;font-weight:800;text-align:center;">${cfg.headline}</h2>
+    <p style="margin:0 0 24px;color:#555;font-size:15px;line-height:1.6;text-align:center;">
+      ${cfg.body}
+    </p>
+    ${noteBlock}
     <div style="text-align:center;margin:0 0 8px;">
       <a href="${trackingUrl}"
          style="display:inline-block;background:${ACCENT_COLOR};color:${PRIMARY_COLOR};text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:15px;">
-        Ver mi pedido
+        Ver estado de mi pedido
       </a>
     </div>`
 
@@ -278,12 +336,53 @@ export async function sendOrderStatusUpdateEmail(to: string, orderStatus: string
     const result = await resend.emails.send({
       from: FROM_EMAIL,
       to,
-      subject: 'Tequecruncheese · Tu pedido fue actualizado',
+      subject: `Tequecruncheese · ${cfg.subject}`,
       html: buildEmailWrapper(content),
     })
     console.log('[email] sendOrderStatusUpdateEmail sent:', result)
   } catch (err) {
     console.error('[email] sendOrderStatusUpdateEmail failed:', err)
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMAIL PERSONALIZADO DESDE EL PANEL ADMIN
+
+export async function sendAdminCustomEmail(params: {
+  to: string
+  subject: string
+  message: string
+  trackingToken: string
+}): Promise<void> {
+  const { to, subject, message, trackingToken } = params
+  const trackingUrl = `${process.env.FRONTEND_URL}/pedido/${trackingToken}`
+
+  const content = `
+    <h2 style="margin:0 0 16px;color:${ACCENT_COLOR};font-size:20px;font-weight:800;">Mensaje de Tequecruncheese</h2>
+    <div style="background:#f9f5ee;border-radius:8px;padding:16px 20px;margin:0 0 24px;font-size:15px;color:#333;line-height:1.7;white-space:pre-wrap;">
+      ${message.replace(/\n/g, '<br>')}
+    </div>
+    <p style="margin:0 0 16px;font-size:13px;color:#888;">
+      Si tienes preguntas, puedes responder este correo o revisar el estado de tu pedido:
+    </p>
+    <div style="text-align:center;">
+      <a href="${trackingUrl}"
+         style="display:inline-block;background:${ACCENT_COLOR};color:${PRIMARY_COLOR};text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:15px;">
+        Ver estado del pedido
+      </a>
+    </div>`
+
+  try {
+    const result = await resend.emails.send({
+      from: FROM_EMAIL,
+      to,
+      subject: `Tequecruncheese · ${subject}`,
+      html: buildEmailWrapper(content),
+    })
+    console.log('[email] sendAdminCustomEmail sent:', result)
+  } catch (err) {
+    console.error('[email] sendAdminCustomEmail failed:', err)
+    throw err
   }
 }
 

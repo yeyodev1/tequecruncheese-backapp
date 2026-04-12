@@ -11,7 +11,10 @@ export interface IDeliveryAddress {
 export interface IOrder extends Document {
   clientTransactionId: string
   payphoneTransactionId?: string
+  payWithPayPhone?: string
   customerEmail: string
+  customerName?: string
+  customerPhone?: string
   trackingToken: string
   items: CartItem[]
   total: number
@@ -38,7 +41,10 @@ const OrderSchema = new Schema<IOrder>(
   {
     clientTransactionId: { type: String, required: true, unique: true, index: true },
     payphoneTransactionId: { type: String },
-    customerEmail: { type: String, required: true },
+    payWithPayPhone: { type: String },
+    customerEmail:  { type: String, required: true },
+    customerName:   { type: String },
+    customerPhone:  { type: String },
     trackingToken: { type: String, required: true, unique: true, index: true },
     items: { type: [CartItemSchema], required: true },
     total: { type: Number, required: true },

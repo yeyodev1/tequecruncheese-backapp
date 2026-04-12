@@ -48,14 +48,40 @@ export async function ordersByEmail(req: Request, res: Response, next: NextFunct
   }
 }
 
-// GET /api/orders/my-orders (auth required)
+// Status group mappings for the `filter` query param
+const STATUS_GROUPS: Record<string, string[]> = {
+  pending:   ['pending'],
+  active:    ['approved', 'preparing', 'ready'],
+  completed: ['delivered'],
+  cancelled: ['rejected', 'cancelled'],
+}
+
+// GET /api/orders/my-orders?filter=pending|active|completed|cancelled  (auth required)
 export async function myOrders(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const userId = req.user!.id
-    const orders = await Order.find({ userId: new mongoose.Types.ObjectId(userId) })
-      .select('status items total createdAt trackingToken updatedAt')
+    const userEmail = req.user!.email
+    const { filter } = req.query as { filter?: string }
+
+    // Build ownership filter (userId OR email for legacy orders without userId)
+    const ownerFilter = {
+      $or: [
+        { userId: new mongoose.Types.ObjectId(userId) },
+        { customerEmail: { $regex: `^${userEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } },
+      ],
+    }
+
+    // Build status filter
+    const statusFilter =
+      filter && STATUS_GROUPS[filter]
+        ? { status: { $in: STATUS_GROUPS[filter] } }
+        : {}
+
+    const orders = await Order.find({ ...ownerFilter, ...statusFilter })
+      .select('status items total createdAt trackingToken updatedAt payWithPayPhone')
       .sort({ createdAt: -1 })
-      .limit(50)
+      .limit(100)
+
     res.json(orders)
   } catch (err) {
     next(err)
