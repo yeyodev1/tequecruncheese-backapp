@@ -48,7 +48,7 @@ export async function adminListProducts(req: Request, res: Response, next: NextF
 // POST /api/admin/products
 export async function createProduct(req: Request, res: Response, next: NextFunction) {
   try {
-    const { nombre, descripcion, precio, categoria, imagen, inStock, hasStock, stockCount, isActive, slug, hasFlavors, boxSize, flavors } = req.body
+    const { nombre, descripcion, precio, categoria, imagen, inStock, hasStock, stockCount, isActive, slug, hasFlavors, boxSize, batchSize, flavors } = req.body
 
     if (!nombre) throw new CustomError('nombre is required', 400)
     if (precio === undefined || precio === null) throw new CustomError('precio is required', 400)
@@ -72,6 +72,7 @@ export async function createProduct(req: Request, res: Response, next: NextFunct
       isActive,
       ...(hasFlavors !== undefined && { hasFlavors }),
       ...(boxSize !== undefined && { boxSize }),
+      ...(batchSize !== undefined && { batchSize }),
       ...(Array.isArray(flavors) && { flavors }),
     })
 
@@ -85,7 +86,7 @@ export async function createProduct(req: Request, res: Response, next: NextFunct
 // PUT /api/admin/products/:id
 export async function updateProduct(req: Request, res: Response, next: NextFunction) {
   try {
-    const { nombre, descripcion, precio, categoria, imagen, inStock, hasStock, stockCount, isActive, slug, hasFlavors, boxSize, flavors } = req.body
+    const { nombre, descripcion, precio, categoria, imagen, inStock, hasStock, stockCount, isActive, slug, hasFlavors, boxSize, batchSize, flavors } = req.body
 
     const updateData: Record<string, unknown> = {}
     if (nombre !== undefined) updateData.nombre = nombre
@@ -97,13 +98,14 @@ export async function updateProduct(req: Request, res: Response, next: NextFunct
     if (hasStock !== undefined) updateData.hasStock = hasStock
     if (stockCount !== undefined) updateData.stockCount = stockCount
     if (isActive !== undefined) updateData.isActive = isActive
-    if (slug !== undefined) updateData.slug = slug
+    if (slug && slug.trim()) updateData.slug = slug.trim()
     if (hasFlavors !== undefined) updateData.hasFlavors = hasFlavors
     if (boxSize !== undefined) updateData.boxSize = boxSize
+    if (batchSize !== undefined) updateData.batchSize = batchSize
     if (Array.isArray(flavors)) updateData.flavors = flavors
 
-    // If nombre changed and no explicit slug, regenerate slug
-    if (nombre !== undefined && slug === undefined) {
+    // If nombre changed and no explicit slug provided, regenerate from nombre
+    if (nombre !== undefined && !updateData.slug) {
       updateData.slug = generateSlug(nombre)
     }
 

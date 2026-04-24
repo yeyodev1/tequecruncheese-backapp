@@ -24,6 +24,7 @@ export interface IProduct extends Document {
   sortOrder: number
   hasFlavors: boolean
   boxSize: number
+  batchSize: number
   flavors: IFlavor[]
 }
 
@@ -45,6 +46,7 @@ const productSchema = new Schema<IProduct>(
     sortOrder: { type: Number, default: 0 },
     hasFlavors: { type: Boolean, default: false },
     boxSize: { type: Number, default: 12 },
+    batchSize: { type: Number, default: 1 },
     flavors: {
       type: [{
         nombre:  { type: String, required: true, trim: true },
