@@ -12,7 +12,10 @@ const whitelist = [
   "http://localhost:8101",
   "https://tequecrunchesse.netlify.app",
   "https://testing-storybrand-frontend.bakano.ec",
-  "https://tequecruncheese.com"
+  "https://tequecruncheese.com",
+  // Netlify serves the apex and the www host; only the apex was listed, so
+  // anyone landing on www got a CORS failure on every request.
+  "https://www.tequecruncheese.com"
 ];
 
 const corsOptions: cors.CorsOptions = {
