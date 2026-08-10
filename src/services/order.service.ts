@@ -3,6 +3,7 @@ import { Order } from '../models/order.model'
 import { User } from '../models/user.model'
 import * as payphoneService from './payphone.service'
 import * as emailService from './email.service'
+import * as mapsService from './maps.service'
 import { CustomError } from '../errors/customError.error'
 import type { PrepareRequest, ConfirmRequest } from '../types/order.types'
 
@@ -28,19 +29,47 @@ async function linkOrCreateUser(customerEmail: string, order: InstanceType<typeo
   }
 }
 
+/**
+ * Delivery is priced on the server from the customer's Maps link. The amount
+ * the browser computed is only a preview — trusting it would let a crafted
+ * request pay $0 shipping, and it would drift whenever the tariff changes.
+ */
+async function resolveDelivery(customerInfo: PrepareRequest['customerInfo'], clientCost?: number) {
+  if (customerInfo?.deliveryMethod === 'pickup') {
+    return { cost: 0, km: undefined as number | undefined }
+  }
+  const mapsUrl = customerInfo?.mapsUrl
+  if (!mapsUrl) return { cost: 0, km: undefined }
+
+  try {
+    const quote = await mapsService.quoteFromMapsUrl(mapsUrl)
+    if (quote.deliveryCost !== null) {
+      return { cost: quote.deliveryCost, km: quote.km ?? undefined }
+    }
+  } catch (err) {
+    console.error('[order.service] delivery quote failed:', err)
+  }
+
+  // Unresolvable link: charge nothing now and coordinate the fee manually,
+  // rather than billing a guessed distance.
+  return { cost: 0, km: undefined, unresolved: true, clientPreview: clientCost }
+}
+
 export async function createOrderAndPrepare(body: PrepareRequest) {
   const { items, clientTransactionId, customerEmail } = body
-
-  const itemsTotal = items.reduce((sum, item) => sum + item.precio * item.cantidad, 0)
-  const total = itemsTotal + (body.deliveryCost ?? 0)
-  const amountCentavos = Math.round(total * 100)
 
   const existing = await Order.findOne({ clientTransactionId })
   if (existing) throw new CustomError('Transaction already exists', 409)
 
+  const { customerInfo } = body
+  const delivery = await resolveDelivery(customerInfo, body.deliveryCost)
+
+  const itemsTotal = items.reduce((sum, item) => sum + item.precio * item.cantidad, 0)
+  const total = Math.round((itemsTotal + delivery.cost) * 100) / 100
+  const amountCentavos = Math.round(total * 100)
+
   const trackingToken = randomUUID()
 
-  const { customerInfo } = body
   const order = await Order.create({
     clientTransactionId,
     customerEmail,
@@ -56,7 +85,9 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
     quiereFactura: customerInfo?.quiereFactura,
     facturaEmail:  customerInfo?.facturaEmail,
     facturaRuc:    customerInfo?.facturaRuc,
-    deliveryCost:  body.deliveryCost ?? 0,
+    deliveryCost:   delivery.cost,
+    deliveryKm:     delivery.km,
+    deliveryMethod: customerInfo?.deliveryMethod ?? 'delivery',
     trackingToken,
     items,
     total,

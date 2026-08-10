@@ -1,8 +1,15 @@
+export interface FlavorSelection {
+  nombre: string
+  grupo: string
+  cantidad: number
+}
+
 export interface CartItem {
   slug: string
   nombre: string
   precio: number
   cantidad: number
+  flavorSelections?: FlavorSelection[]
 }
 
 export type OrderStatus =
@@ -30,6 +37,7 @@ export interface CustomerInfo {
   quiereFactura?: boolean
   facturaEmail?: string
   facturaRuc?: string
+  deliveryMethod?: 'delivery' | 'pickup'
 }
 
 export interface PrepareRequest {

@@ -5,8 +5,7 @@ import adminRouter from "./admin.routes";
 import authRouter from "./auth.routes";
 import productRouter from "./product.routes";
 import categoryRouter from "./category.routes";
-
-const MAPS_URL_RE = /^https:\/\/(maps\.app\.goo\.gl|maps\.google\.com|www\.google\.com\/maps)/
+import * as mapsService from "../services/maps.service";
 
 function routerApi(app: Application) {
   const router = express.Router();
@@ -19,24 +18,18 @@ function routerApi(app: Application) {
   router.use("/products", productRouter);
   router.use("/categories", categoryRouter);
 
-  // Resolves Google Maps short URLs (maps.app.goo.gl) by following the redirect
-  // and returning the final URL which contains extractable coordinates.
+  // Resolves any pasted Google Maps link (short, long, regional domain, or bare
+  // "lat,lng") into coordinates, distance from the store, and delivery cost.
+  // Always 200: an unresolvable link returns null coords so the checkout can
+  // show "envío por coordinar" instead of failing or guessing a price.
   router.get("/maps/resolve", async (req: Request, res: Response) => {
     const url = req.query.url as string
-    if (!url || !MAPS_URL_RE.test(url)) {
-      res.status(400).json({ error: "Invalid or missing url parameter" })
+    if (!url || typeof url !== "string") {
+      res.status(400).json({ error: "Missing url parameter" })
       return
     }
-    try {
-      const response = await fetch(url, {
-        method: "GET",
-        redirect: "follow",
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; TequeBot/1.0)" },
-      })
-      res.json({ resolvedUrl: response.url })
-    } catch {
-      res.status(502).json({ error: "Could not resolve URL" })
-    }
+    const quote = await mapsService.quoteFromMapsUrl(url)
+    res.json(quote)
   })
 }
 

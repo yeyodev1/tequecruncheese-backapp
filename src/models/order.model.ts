@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose'
-import type { CartItem, OrderStatus, AdminNote } from '../types/order.types'
+import type { CartItem, OrderStatus, AdminNote, FlavorSelection } from '../types/order.types'
 
 export interface IDeliveryAddress {
   calle: string
@@ -27,9 +27,20 @@ export interface IOrder extends Document {
   facturaEmail?: string
   facturaRuc?: string
   deliveryCost?: number
+  deliveryKm?: number
+  deliveryMethod?: 'delivery' | 'pickup'
   createdAt: Date
   updatedAt: Date
 }
+
+const FlavorSelectionSchema = new Schema<FlavorSelection>(
+  {
+    nombre: { type: String, required: true },
+    grupo: { type: String, required: true },
+    cantidad: { type: Number, required: true, min: 1 },
+  },
+  { _id: false },
+)
 
 const CartItemSchema = new Schema<CartItem>(
   {
@@ -37,6 +48,9 @@ const CartItemSchema = new Schema<CartItem>(
     nombre: { type: String, required: true },
     precio: { type: Number, required: true },
     cantidad: { type: Number, required: true, min: 1 },
+    // Flavor boxes carry their per-flavor breakdown; mongoose silently drops
+    // anything not declared here, which is why orders used to arrive empty.
+    flavorSelections: { type: [FlavorSelectionSchema], default: undefined },
   },
   { _id: false },
 )
@@ -78,6 +92,8 @@ const OrderSchema = new Schema<IOrder>(
     facturaEmail:  { type: String },
     facturaRuc:    { type: String, match: /^(\d{10}|\d{13})$/ },
     deliveryCost:  { type: Number, default: 0 },
+    deliveryKm:    { type: Number },
+    deliveryMethod: { type: String, enum: ['delivery', 'pickup'], default: 'delivery' },
   },
   { timestamps: true },
 )

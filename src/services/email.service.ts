@@ -11,12 +11,20 @@ const TEAM_EMAIL = process.env.TEAM_EMAIL ?? 'pedidos@tequecruncheese.com'
 const ACCENT_COLOR = '#2d1b00'
 const PRIMARY_COLOR = '#fed47f'
 
+function buildFlavorLine(item: CartItem): string {
+  if (!item.flavorSelections?.length) return ''
+  const detail = item.flavorSelections
+    .map((f) => `${f.cantidad}× ${f.nombre}`)
+    .join(', ')
+  return `<br /><span style="font-size:12px;color:#777;">Sabores: ${detail}</span>`
+}
+
 function buildItemsTable(items: CartItem[]): string {
   const rows = items
     .map(
       (item) => `
       <tr>
-        <td style="padding:8px 12px;border-bottom:1px solid #f0f0f0;font-size:14px;color:#333;">${item.nombre}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #f0f0f0;font-size:14px;color:#333;">${item.nombre}${buildFlavorLine(item)}</td>
         <td style="padding:8px 12px;border-bottom:1px solid #f0f0f0;font-size:14px;color:#555;text-align:center;">${item.cantidad}</td>
         <td style="padding:8px 12px;border-bottom:1px solid #f0f0f0;font-size:14px;color:${ACCENT_COLOR};font-weight:700;text-align:right;">$${(item.precio * item.cantidad).toFixed(2)}</td>
       </tr>`,
