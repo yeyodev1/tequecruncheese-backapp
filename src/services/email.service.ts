@@ -1,5 +1,6 @@
 import { Resend } from 'resend'
 import type { CartItem } from '../types/order.types'
+import { formatScheduledFor } from './schedule.service'
 
 const resend = new Resend(process.env.RESEND_KEY)
 
@@ -10,6 +11,18 @@ const TEAM_EMAIL = process.env.TEAM_EMAIL ?? 'pedidos@tequecruncheese.com'
 
 const ACCENT_COLOR = '#2d1b00'
 const PRIMARY_COLOR = '#fed47f'
+
+/** Highlighted banner for scheduled orders — the date must not be missable. */
+function buildScheduleBanner(scheduledFor?: Date | null): string {
+  if (!scheduledFor) return ''
+  return `
+    <div style="background:${PRIMARY_COLOR};border-radius:8px;padding:14px 18px;margin:0 0 20px;">
+      <p style="margin:0 0 2px;font-size:13px;color:${ACCENT_COLOR};opacity:0.75;">📅 Pedido programado</p>
+      <p style="margin:0;font-size:16px;font-weight:800;color:${ACCENT_COLOR};text-transform:capitalize;">
+        ${formatScheduledFor(scheduledFor)}
+      </p>
+    </div>`
+}
 
 function buildFlavorLine(item: CartItem): string {
   if (!item.flavorSelections?.length) return ''
@@ -81,8 +94,9 @@ export async function sendOrderPendingEmail(params: {
   items: CartItem[]
   total: number
   trackingToken: string
+  scheduledFor?: Date | null
 }): Promise<void> {
-  const { to, items, total, trackingToken } = params
+  const { to, items, total, trackingToken, scheduledFor } = params
   const trackingUrl = `${process.env.FRONTEND_URL}/pedido/${trackingToken}`
 
   const content = `
@@ -90,6 +104,7 @@ export async function sendOrderPendingEmail(params: {
     <p style="margin:0 0 20px;color:#555;font-size:15px;line-height:1.6;">
       Estamos procesando tu pago. En cuanto se confirme, te enviaremos otro correo con la notificación.
     </p>
+    ${buildScheduleBanner(scheduledFor)}
     ${buildItemsTable(items)}
     <div style="text-align:right;margin:8px 0 24px;font-size:16px;color:${ACCENT_COLOR};font-weight:800;">
       Total: $${total.toFixed(2)}
@@ -409,8 +424,9 @@ export async function sendNewOrderAlertToTeam(params: {
   total: number
   trackingToken: string
   orderId: string
+  scheduledFor?: Date | null
 }): Promise<void> {
-  const { customerEmail, customerName, items, total, trackingToken, orderId } = params
+  const { customerEmail, customerName, items, total, trackingToken, orderId, scheduledFor } = params
   const adminUrl = `${process.env.FRONTEND_URL}/admin/dashboard`
   const trackingUrl = `${process.env.FRONTEND_URL}/pedido/${trackingToken}`
   const displayName = customerName ?? customerEmail
@@ -427,6 +443,7 @@ export async function sendNewOrderAlertToTeam(params: {
       <p style="margin:2px 0 0;font-size:13px;color:#555;">${customerEmail}</p>
     </div>
 
+    ${buildScheduleBanner(scheduledFor)}
     ${buildItemsTable(items)}
 
     <div style="text-align:right;margin:8px 0 24px;font-size:16px;color:${ACCENT_COLOR};font-weight:800;">

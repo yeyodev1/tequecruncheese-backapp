@@ -29,6 +29,8 @@ export interface IOrder extends Document {
   deliveryCost?: number
   deliveryKm?: number
   deliveryMethod?: 'delivery' | 'pickup'
+  /** Absent on immediate orders; set when the customer booked a slot. */
+  scheduledFor?: Date
   createdAt: Date
   updatedAt: Date
 }
@@ -94,6 +96,8 @@ const OrderSchema = new Schema<IOrder>(
     deliveryCost:  { type: Number, default: 0 },
     deliveryKm:    { type: Number },
     deliveryMethod: { type: String, enum: ['delivery', 'pickup'], default: 'delivery' },
+    // Indexed so the kitchen can pull the upcoming schedule in order.
+    scheduledFor:  { type: Date, index: true },
   },
   { timestamps: true },
 )

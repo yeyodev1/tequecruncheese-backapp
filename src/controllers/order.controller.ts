@@ -9,7 +9,7 @@ export async function trackOrder(req: Request, res: Response, next: NextFunction
   try {
     const { token } = req.params
     const order = await Order.findOne({ trackingToken: token }).select(
-      'status items total createdAt trackingToken',
+      'status items total createdAt trackingToken scheduledFor',
     )
     if (!order) throw new CustomError('Order not found', 404)
 
@@ -18,6 +18,7 @@ export async function trackOrder(req: Request, res: Response, next: NextFunction
       items: order.items,
       total: order.total,
       createdAt: order.createdAt,
+      scheduledFor: order.scheduledFor,
     })
   } catch (err) {
     next(err)
@@ -38,7 +39,7 @@ export async function ordersByEmail(req: Request, res: Response, next: NextFunct
       customerEmail: { $regex: `^${email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
       status: { $nin: ['pending'] },
     })
-      .select('status items total createdAt trackingToken updatedAt')
+      .select('status items total createdAt trackingToken updatedAt scheduledFor')
       .sort({ createdAt: -1 })
       .limit(20)
 
@@ -78,7 +79,7 @@ export async function myOrders(req: AuthRequest, res: Response, next: NextFuncti
         : {}
 
     const orders = await Order.find({ ...ownerFilter, ...statusFilter })
-      .select('status items total createdAt trackingToken updatedAt payWithPayPhone')
+      .select('status items total createdAt trackingToken updatedAt payWithPayPhone scheduledFor')
       .sort({ createdAt: -1 })
       .limit(100)
 
@@ -98,7 +99,7 @@ export async function listOrders(req: Request, res: Response, next: NextFunction
         : { status: { $in: ['approved', 'preparing', 'ready', 'delivered', 'rejected', 'cancelled'] } }
 
     const orders = await Order.find(filter)
-      .select('clientTransactionId status total items createdAt trackingToken')
+      .select('clientTransactionId status total items createdAt trackingToken scheduledFor')
       .sort({ createdAt: -1 })
       .limit(200)
 

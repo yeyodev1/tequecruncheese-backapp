@@ -46,6 +46,8 @@ export interface PrepareRequest {
   customerEmail: string
   customerInfo?: CustomerInfo
   deliveryCost?: number
+  /** ISO instant for a scheduled order; omitted means "as soon as possible". */
+  scheduledFor?: string
 }
 
 export interface TrackOrderResponse {

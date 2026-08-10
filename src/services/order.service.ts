@@ -4,6 +4,7 @@ import { User } from '../models/user.model'
 import * as payphoneService from './payphone.service'
 import * as emailService from './email.service'
 import * as mapsService from './maps.service'
+import * as scheduleService from './schedule.service'
 import { CustomError } from '../errors/customError.error'
 import type { PrepareRequest, ConfirmRequest } from '../types/order.types'
 
@@ -61,6 +62,10 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
   const existing = await Order.findOne({ clientTransactionId })
   if (existing) throw new CustomError('Transaction already exists', 409)
 
+  // Re-checked server-side: a stale tab could still be offering a slot that
+  // has since passed, or that falls outside opening hours.
+  const scheduledFor = scheduleService.validateScheduledFor(body.scheduledFor)
+
   const { customerInfo } = body
   const delivery = await resolveDelivery(customerInfo, body.deliveryCost)
 
@@ -88,6 +93,7 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
     deliveryCost:   delivery.cost,
     deliveryKm:     delivery.km,
     deliveryMethod: customerInfo?.deliveryMethod ?? 'delivery',
+    scheduledFor:   scheduledFor ?? undefined,
     trackingToken,
     items,
     total,
@@ -114,7 +120,7 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
     await order.save()
 
     // Email al cliente: pedido recibido, procesando pago
-    void emailService.sendOrderPendingEmail({ to: customerEmail, items, total, trackingToken })
+    void emailService.sendOrderPendingEmail({ to: customerEmail, items, total, trackingToken, scheduledFor })
     // Alerta interna al equipo: nuevo pedido entrante
     void emailService.sendNewOrderAlertToTeam({
       customerEmail,
@@ -122,6 +128,7 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
       total,
       trackingToken,
       orderId: String(order._id),
+      scheduledFor,
     })
 
     return { payWithPayPhone: result.payWithPayPhone }
