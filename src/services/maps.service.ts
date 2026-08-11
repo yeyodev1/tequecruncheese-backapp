@@ -93,6 +93,50 @@ const COORD_PATTERNS: RegExp[] = [
 /** Whole-input bare coordinates — customers often paste just "-2.15, -79.91". */
 const BARE_COORDS_RE = new RegExp(`^\\s*${NUM}\\s*,\\s*${NUM}\\s*$`)
 
+/**
+ * A "how to get there" link rather than a place link. Customers share these
+ * straight from the directions screen, so the address we must deliver to is
+ * the *destination* — the origin is our own store and would price at $2.00.
+ */
+const DIRECTIONS_RE = /[?&](?:daddr|destination)=|\/maps\/dir\//i
+
+/** Destination-only patterns: these can never capture the origin. */
+const DEST_PATTERNS: RegExp[] = [
+  new RegExp(`[?&](?:daddr|destination)=(?:loc:)?${NUM},\\+?${NUM}`),
+  new RegExp(`/maps/dir/[^/?#]*/${NUM},\\+?${NUM}`),
+]
+
+/** Closer than this to the store, a directions hit is the origin, not a home. */
+const SAME_PLACE_KM = 0.05
+
+/**
+ * Percent-decode without losing the whole string to one bad escape.
+ *
+ * Maps HTML embeds its deep link percent-encoded (`%213d-2.04%214d-79.85`)
+ * inside 200 KB of minified JS full of stray `%`. A single `decodeURIComponent`
+ * over that throws, so every coordinate in the body stayed invisible.
+ */
+function decodeSafe(text: string): string {
+  return text.replace(/(?:%[0-9A-Fa-f]{2})+/g, (seq) => {
+    try {
+      return decodeURIComponent(seq)
+    } catch {
+      return seq
+    }
+  })
+}
+
+/** Every plausible pair a pattern finds, in document order. */
+function matchAllCoords(text: string, pattern: RegExp): Coords[] {
+  const found: Coords[] = []
+  for (const match of text.matchAll(new RegExp(pattern.source, 'gi'))) {
+    const lat = parseFloat(match[1]!)
+    const lng = parseFloat(match[2]!)
+    if (isPlausible(lat, lng)) found.push({ lat, lng })
+  }
+  return found
+}
+
 function isPlausible(lat: number, lng: number): boolean {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false
   return (
@@ -103,8 +147,13 @@ function isPlausible(lat: number, lng: number): boolean {
   )
 }
 
-/** Pull the first plausible coordinate pair out of a URL, or of an HTML body. */
-export function extractCoords(text: string): Coords | null {
+/**
+ * Pull a plausible coordinate pair out of a URL, or of an HTML body.
+ *
+ * `preferLast` picks the final match instead of the first: a directions page
+ * lists its waypoints in travel order, so the last `!3d!4d` is the destination.
+ */
+export function extractCoords(text: string, preferLast = false): Coords | null {
   if (!text) return null
 
   const bare = text.match(BARE_COORDS_RE)
@@ -114,25 +163,37 @@ export function extractCoords(text: string): Coords | null {
     if (isPlausible(lat, lng)) return { lat, lng }
   }
 
-  let decoded = text
-  try {
-    decoded = decodeURIComponent(text)
-  } catch {
-    // Malformed percent-encoding — keep searching the raw string.
-  }
+  const decoded = decodeSafe(text)
 
-  for (const candidate of [text, decoded]) {
+  for (const candidate of decoded === text ? [text] : [text, decoded]) {
     for (const pattern of COORD_PATTERNS) {
-      const match = candidate.match(pattern)
-      if (!match) continue
-      const lat = parseFloat(match[1]!)
-      const lng = parseFloat(match[2]!)
-      // Keep scanning the remaining patterns when a match is implausible —
-      // a bad `@` hit must not shadow a good `!3d!4d` further along.
-      if (isPlausible(lat, lng)) return { lat, lng }
+      // Collect every hit: a bad `@` match must not shadow a good `!3d!4d`,
+      // and on a route we need the last pair, not the first.
+      const hits = matchAllCoords(candidate, pattern)
+      if (hits.length) return preferLast ? hits[hits.length - 1]! : hits[0]!
     }
   }
 
+  return null
+}
+
+/**
+ * Coordinates of the delivery address for a directions link.
+ *
+ * Tries the destination-only URL params first, then falls back to the last
+ * waypoint in the page — and refuses a hit sitting on the store itself, which
+ * is the origin leaking through rather than a customer address.
+ */
+export function extractDestinationCoords(url: string, body: string): Coords | null {
+  for (const source of [url, decodeSafe(url)]) {
+    for (const pattern of DEST_PATTERNS) {
+      const hits = matchAllCoords(source, pattern)
+      if (hits.length) return hits[0]!
+    }
+  }
+
+  const last = extractCoords(body, true)
+  if (last && haversineKm(ORIGIN, last) > SAME_PLACE_KM) return last
   return null
 }
 
@@ -228,7 +289,10 @@ export async function quoteFromMapsUrl(raw: string): Promise<MapsQuote> {
   const normalized = normalizeMapsUrl(raw ?? '')
   if (!normalized) return direct ? finalize(raw, direct) : empty
 
-  const fromUrl = extractCoords(normalized)
+  // A pasted long directions URL carries both waypoints — take the destination.
+  const fromUrl = DIRECTIONS_RE.test(normalized)
+    ? extractDestinationCoords(normalized, normalized)
+    : extractCoords(normalized)
   if (fromUrl) return finalize(normalized, fromUrl)
 
   let lastUrl = normalized
@@ -236,7 +300,11 @@ export async function quoteFromMapsUrl(raw: string): Promise<MapsQuote> {
     try {
       const { finalUrl, body } = await followAndRead(normalized, userAgent)
       lastUrl = finalUrl
-      const coords = extractCoords(finalUrl) ?? extractCoords(body)
+      // A directions link must be read destination-first, or we would quote the
+      // distance from the store to the store and charge the cheapest tier.
+      const coords = DIRECTIONS_RE.test(finalUrl)
+        ? extractDestinationCoords(finalUrl, body)
+        : extractCoords(finalUrl) ?? extractCoords(body)
       if (coords) return finalize(finalUrl, coords)
     } catch {
       // Timeout or network error — fall through to the next user agent.
