@@ -17,6 +17,8 @@ export interface MapsQuote {
   coords: Coords | null
   km: number | null
   deliveryCost: number | null
+  /** 'driving' = road distance from a routing API; 'straight' = haversine fallback. */
+  kmSource: 'driving' | 'straight' | null
 }
 
 /** Store origin — override per environment without a redeploy of the code. */
@@ -225,6 +227,72 @@ export function normalizeMapsUrl(raw: string): string | null {
   }
 }
 
+/**
+ * Road distance in km, or null when no routing service answers.
+ *
+ * Straight-line distance under-charges badly here: Guayaquil and Samborondón
+ * are split by rivers, so a 15 km haversine is 20+ km of actual riding. Google
+ * Routes API is preferred because its number is the one the customer compares
+ * against; OSRM's public server is the free no-key fallback.
+ */
+async function drivingKm(a: Coords, b: Coords): Promise<number | null> {
+  const key = process.env.GOOGLE_MAPS_API_KEY
+  if (key) {
+    const km = await googleDrivingKm(a, b, key)
+    if (km !== null) return km
+  }
+  return osrmDrivingKm(a, b)
+}
+
+async function googleDrivingKm(a: Coords, b: Coords, key: string): Promise<number | null> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 5000)
+  try {
+    const response = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': key,
+        'X-Goog-FieldMask': 'routes.distanceMeters',
+      },
+      body: JSON.stringify({
+        origin: { location: { latLng: { latitude: a.lat, longitude: a.lng } } },
+        destination: { location: { latLng: { latitude: b.lat, longitude: b.lng } } },
+        travelMode: 'DRIVE',
+      }),
+    })
+    if (!response.ok) return null
+    const data = (await response.json()) as { routes?: Array<{ distanceMeters?: number }> }
+    const meters = data.routes?.[0]?.distanceMeters
+    return typeof meters === 'number' && meters > 0 ? meters / 1000 : null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function osrmDrivingKm(a: Coords, b: Coords): Promise<number | null> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 5000)
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=false&alternatives=false`
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'TequeBot/1.0' },
+    })
+    if (!response.ok) return null
+    const data = (await response.json()) as { code?: string; routes?: Array<{ distance?: number }> }
+    const meters = data.code === 'Ok' ? data.routes?.[0]?.distance : undefined
+    return typeof meters === 'number' && meters > 0 ? meters / 1000 : null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export function haversineKm(a: Coords, b: Coords): number {
   const R = 6371
   const toRad = (v: number) => (v * Math.PI) / 180
@@ -282,18 +350,18 @@ async function followAndRead(url: string, userAgent: string): Promise<{ finalUrl
  * renders as "envío por coordinar" rather than a wrong charge.
  */
 export async function quoteFromMapsUrl(raw: string): Promise<MapsQuote> {
-  const empty: MapsQuote = { resolvedUrl: raw, coords: null, km: null, deliveryCost: null }
+  const empty: MapsQuote = { resolvedUrl: raw, coords: null, km: null, deliveryCost: null, kmSource: null }
 
   // A pasted "lat,lng" needs no network round trip.
   const direct = extractCoords(raw ?? '')
   const normalized = normalizeMapsUrl(raw ?? '')
-  if (!normalized) return direct ? finalize(raw, direct) : empty
+  if (!normalized) return direct ? await finalize(raw, direct) : empty
 
   // A pasted long directions URL carries both waypoints — take the destination.
   const fromUrl = DIRECTIONS_RE.test(normalized)
     ? extractDestinationCoords(normalized, normalized)
     : extractCoords(normalized)
-  if (fromUrl) return finalize(normalized, fromUrl)
+  if (fromUrl) return await finalize(normalized, fromUrl)
 
   let lastUrl = normalized
   for (const userAgent of USER_AGENTS) {
@@ -305,19 +373,31 @@ export async function quoteFromMapsUrl(raw: string): Promise<MapsQuote> {
       const coords = DIRECTIONS_RE.test(finalUrl)
         ? extractDestinationCoords(finalUrl, body)
         : extractCoords(finalUrl) ?? extractCoords(body)
-      if (coords) return finalize(finalUrl, coords)
+      if (coords) return await finalize(finalUrl, coords)
     } catch {
       // Timeout or network error — fall through to the next user agent.
     }
   }
 
-  return direct ? finalize(lastUrl, direct) : { ...empty, resolvedUrl: lastUrl }
+  return direct ? await finalize(lastUrl, direct) : { ...empty, resolvedUrl: lastUrl }
 }
 
-function finalize(resolvedUrl: string, coords: Coords | null): MapsQuote {
-  if (!coords) return { resolvedUrl, coords: null, km: null, deliveryCost: null }
-  const km = haversineKm(ORIGIN, coords)
+async function finalize(resolvedUrl: string, coords: Coords | null): Promise<MapsQuote> {
+  if (!coords) return { resolvedUrl, coords: null, km: null, deliveryCost: null, kmSource: null }
+  const straight = haversineKm(ORIGIN, coords)
+  // Skip the routing round trip for a pin on the store itself, and refuse a
+  // routing answer wildly off the straight line (a snapped-to-wrong-road
+  // artifact), falling back to haversine as before.
+  let km = straight
+  let kmSource: MapsQuote['kmSource'] = 'straight'
+  if (straight > SAME_PLACE_KM) {
+    const road = await drivingKm(ORIGIN, coords)
+    if (road !== null && road >= straight * 0.9 && road <= straight * 3 + 2) {
+      km = road
+      kmSource = 'driving'
+    }
+  }
   const deliveryCost = getDeliveryCost(km)
   // Out of radius: report the distance but leave the price to be coordinated.
-  return { resolvedUrl, coords, km: Math.round(km * 100) / 100, deliveryCost }
+  return { resolvedUrl, coords, km: Math.round(km * 100) / 100, deliveryCost, kmSource }
 }
