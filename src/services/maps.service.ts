@@ -233,7 +233,9 @@ export function normalizeMapsUrl(raw: string): string | null {
  * Straight-line distance under-charges badly here: Guayaquil and Samborondón
  * are split by rivers, so a 15 km haversine is 20+ km of actual riding. Google
  * Routes API is preferred because its number is the one the customer compares
- * against; OSRM's public server is the free no-key fallback.
+ * against. Among the free no-key engines, Valhalla goes before OSRM: its auto
+ * costing picks the same big-avenue routes Google does (22.8 km to Monte Tabor
+ * where OSRM's shortest-path answer was 19.4 km and Google showed 22 km).
  */
 async function drivingKm(a: Coords, b: Coords): Promise<number | null> {
   const key = process.env.GOOGLE_MAPS_API_KEY
@@ -241,7 +243,32 @@ async function drivingKm(a: Coords, b: Coords): Promise<number | null> {
     const km = await googleDrivingKm(a, b, key)
     if (km !== null) return km
   }
-  return osrmDrivingKm(a, b)
+  return (await valhallaDrivingKm(a, b)) ?? (await osrmDrivingKm(a, b))
+}
+
+async function valhallaDrivingKm(a: Coords, b: Coords): Promise<number | null> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 5000)
+  try {
+    const response = await fetch('https://valhalla1.openstreetmap.de/route', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'TequeBot/1.0' },
+      body: JSON.stringify({
+        locations: [{ lat: a.lat, lon: a.lng }, { lat: b.lat, lon: b.lng }],
+        costing: 'auto',
+        units: 'kilometers',
+      }),
+    })
+    if (!response.ok) return null
+    const data = (await response.json()) as { trip?: { summary?: { length?: number } } }
+    const km = data.trip?.summary?.length
+    return typeof km === 'number' && km > 0 ? km : null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function googleDrivingKm(a: Coords, b: Coords, key: string): Promise<number | null> {
