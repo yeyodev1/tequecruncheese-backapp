@@ -271,6 +271,17 @@ async function valhallaDrivingKm(a: Coords, b: Coords): Promise<number | null> {
   }
 }
 
+/**
+ * Google's optimal-route distance runs systematically short of what the
+ * courier rides (and of what the Maps app shows with live traffic), so it is
+ * padded by this factor. 1.10 was calibrated 2026-08-19 against three
+ * customer-validated fares: Monte Tabor 21.48→23.63 km ($9), Policentro
+ * 2.87→3.16 km ($3), San Fernando 5.39→5.93 km ($4). Tune via env if the
+ * tariff table or the city changes; the fallback engines are not padded
+ * because Valhalla already routes the way Google's app does.
+ */
+const GOOGLE_KM_FACTOR = Number(process.env.GOOGLE_KM_FACTOR ?? 1.1)
+
 async function googleDrivingKm(a: Coords, b: Coords, key: string): Promise<number | null> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 5000)
@@ -292,7 +303,7 @@ async function googleDrivingKm(a: Coords, b: Coords, key: string): Promise<numbe
     if (!response.ok) return null
     const data = (await response.json()) as { routes?: Array<{ distanceMeters?: number }> }
     const meters = data.routes?.[0]?.distanceMeters
-    return typeof meters === 'number' && meters > 0 ? meters / 1000 : null
+    return typeof meters === 'number' && meters > 0 ? (meters / 1000) * GOOGLE_KM_FACTOR : null
   } catch {
     return null
   } finally {
