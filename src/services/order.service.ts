@@ -35,36 +35,57 @@ async function linkOrCreateUser(customerEmail: string, order: InstanceType<typeo
  * the browser computed is only a preview — trusting it would let a crafted
  * request pay $0 shipping, and it would drift whenever the tariff changes.
  */
-async function resolveDelivery(customerInfo: PrepareRequest['customerInfo'], clientCost?: number) {
+async function resolveDelivery(customerInfo: PrepareRequest['customerInfo']) {
   if (customerInfo?.deliveryMethod === 'pickup') {
     return { cost: 0, km: undefined as number | undefined }
   }
-  const mapsUrl = customerInfo?.mapsUrl
-  if (!mapsUrl) return { cost: 0, km: undefined }
 
-  try {
-    const quote = await mapsService.quoteFromMapsUrl(mapsUrl)
-    if (quote.deliveryCost !== null) {
-      return { cost: quote.deliveryCost, km: quote.km ?? undefined }
-    }
-  } catch (err) {
-    console.error('[order.service] delivery quote failed:', err)
+  const mapsUrl = customerInfo?.mapsUrl?.trim()
+  // A delivery with nowhere to deliver to cannot be priced, and guessing is
+  // what produced the free shipments. The checkout offers a map for exactly
+  // this, so there is somewhere to send the customer.
+  if (!mapsUrl) {
+    throw new CustomError(
+      'Necesitamos tu ubicación para calcular el envío. Marca tu ubicación en el mapa del checkout.',
+      400,
+    )
   }
 
-  // Unresolvable link. Charging $0 here was the worst of the options: the order
-  // simply shipped free, and nothing in it said so. The browser quoted the
-  // customer a fare from the same tariff table before they paid, so bill that
-  // instead — bounded by the table so a crafted request cannot name its own
-  // price, and flagged so the team can check the distance by hand.
-  const preview =
-    typeof clientCost === 'number' && Number.isFinite(clientCost)
-      ? Math.min(Math.max(clientCost, mapsService.TARIFF_RANGE.min), mapsService.TARIFF_RANGE.max)
-      : 0
+  let quote
+  try {
+    quote = await mapsService.quoteFromMapsUrl(mapsUrl)
+  } catch (err) {
+    console.error('[order.service] delivery quote failed:', err)
+    throw new CustomError(
+      'No pudimos calcular tu envío en este momento. Vuelve a intentarlo en unos segundos.',
+      503,
+    )
+  }
 
-  console.warn(
-    `[order.service] unresolved delivery link, billing preview $${preview.toFixed(2)}: ${mapsUrl}`,
+  if (quote.deliveryCost !== null) {
+    return { cost: quote.deliveryCost, km: quote.km ?? undefined }
+  }
+
+  // Located, but past the delivery radius: this is a "we cannot take it", not
+  // a "try again", so it gets its own answer.
+  if (quote.coords && quote.km !== null) {
+    throw new CustomError(
+      `Estás a ${quote.km.toFixed(1)} km de la tienda, fuera de nuestra zona de entrega. ` +
+        'Escríbenos por WhatsApp y coordinamos contigo.',
+      409,
+    )
+  }
+
+  // Nothing recognisable at all. Previously this billed the browser's estimate,
+  // or $0 when there was none — an order could go out with free shipping and
+  // nothing on it saying so. Better to stop here: the fee is part of the price,
+  // and charging a price nobody computed is worse than asking once more.
+  console.warn(`[order.service] unresolvable delivery location, refusing order: ${mapsUrl}`)
+  throw new CustomError(
+    'No pudimos ubicar esa dirección. Marca tu ubicación en el mapa del checkout ' +
+      'para calcular tu envío.',
+    422,
   )
-  return { cost: preview, km: undefined, unresolved: true }
 }
 
 export async function createOrderAndPrepare(body: PrepareRequest) {
@@ -83,7 +104,7 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
   const scheduledFor = scheduleService.validateScheduledFor(body.scheduledFor)
 
   const { customerInfo } = body
-  const delivery = await resolveDelivery(customerInfo, body.deliveryCost)
+  const delivery = await resolveDelivery(customerInfo)
 
   const itemsTotal = items.reduce((sum, item) => sum + item.precio * item.cantidad, 0)
   const total = Math.round((itemsTotal + delivery.cost) * 100) / 100
@@ -151,7 +172,6 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
         deliveryAddress: order.deliveryAddress,
         deliveryCost: delivery.cost,
         deliveryMethod: customerInfo?.deliveryMethod ?? 'delivery',
-        deliveryUnresolved: 'unresolved' in delivery && delivery.unresolved === true,
         items,
         total,
         trackingToken,
