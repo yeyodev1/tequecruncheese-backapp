@@ -411,6 +411,12 @@ export function haversineKm(a: Coords, b: Coords): number {
   return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
 }
 
+/** The cheapest and dearest fares in the table, for bounding a client preview. */
+export const TARIFF_RANGE = {
+  min: Math.min(...TARIFFS.map(([, price]) => price)),
+  max: Math.max(...TARIFFS.map(([, price]) => price)),
+}
+
 /** Tariff for a distance, or null when it is beyond the delivery radius. */
 export function getDeliveryCost(km: number): number | null {
   if (!Number.isFinite(km) || km < 0) return null

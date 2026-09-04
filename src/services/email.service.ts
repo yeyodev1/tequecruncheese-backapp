@@ -72,8 +72,10 @@ function buildDispatchBlock(params: {
   deliveryAddress?: { calle?: string; barrio?: string; referencia?: string; mapsUrl?: string }
   deliveryCost?: number
   deliveryMethod?: 'delivery' | 'pickup'
+  /** The map link could not be resolved; the fee shown is the browser's quote. */
+  deliveryUnresolved?: boolean
 }): string {
-  const { customerEmail, customerName, customerPhone, deliveryAddress, deliveryCost, deliveryMethod } = params
+  const { customerEmail, customerName, customerPhone, deliveryAddress, deliveryCost, deliveryMethod, deliveryUnresolved } = params
 
   const row = (label: string, value: string) => `
     <tr>
@@ -98,7 +100,14 @@ function buildDispatchBlock(params: {
           ? row('Mapa', `<a href="${deliveryAddress.mapsUrl}" style="color:#1a73e8;">Abrir ubicación</a>`)
           : '',
         typeof deliveryCost === 'number'
-          ? row('Envío', deliveryCost > 0 ? `$${deliveryCost.toFixed(2)}` : 'Por coordinar')
+          ? row(
+              'Envío',
+              deliveryUnresolved
+                ? `<span style="color:#b7791f;">$${deliveryCost.toFixed(2)} · ⚠️ no pudimos ubicar el mapa, confirmar distancia</span>`
+                : deliveryCost > 0
+                  ? `$${deliveryCost.toFixed(2)}`
+                  : 'Por coordinar',
+            )
           : '',
       ].join('')
 
@@ -480,6 +489,7 @@ export async function sendNewOrderAlertToTeam(params: {
   deliveryAddress?: { calle?: string; barrio?: string; referencia?: string; mapsUrl?: string }
   deliveryCost?: number
   deliveryMethod?: 'delivery' | 'pickup'
+  deliveryUnresolved?: boolean
   items: CartItem[]
   total: number
   trackingToken: string
@@ -540,6 +550,7 @@ export async function sendPaymentConfirmedAlertToTeam(params: {
   deliveryAddress?: { calle?: string; barrio?: string; referencia?: string; mapsUrl?: string }
   deliveryCost?: number
   deliveryMethod?: 'delivery' | 'pickup'
+  deliveryUnresolved?: boolean
   items: CartItem[]
   total: number
   trackingToken: string

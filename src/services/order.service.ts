@@ -51,9 +51,20 @@ async function resolveDelivery(customerInfo: PrepareRequest['customerInfo'], cli
     console.error('[order.service] delivery quote failed:', err)
   }
 
-  // Unresolvable link: charge nothing now and coordinate the fee manually,
-  // rather than billing a guessed distance.
-  return { cost: 0, km: undefined, unresolved: true, clientPreview: clientCost }
+  // Unresolvable link. Charging $0 here was the worst of the options: the order
+  // simply shipped free, and nothing in it said so. The browser quoted the
+  // customer a fare from the same tariff table before they paid, so bill that
+  // instead — bounded by the table so a crafted request cannot name its own
+  // price, and flagged so the team can check the distance by hand.
+  const preview =
+    typeof clientCost === 'number' && Number.isFinite(clientCost)
+      ? Math.min(Math.max(clientCost, mapsService.TARIFF_RANGE.min), mapsService.TARIFF_RANGE.max)
+      : 0
+
+  console.warn(
+    `[order.service] unresolved delivery link, billing preview $${preview.toFixed(2)}: ${mapsUrl}`,
+  )
+  return { cost: preview, km: undefined, unresolved: true }
 }
 
 export async function createOrderAndPrepare(body: PrepareRequest) {
@@ -140,6 +151,7 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
         deliveryAddress: order.deliveryAddress,
         deliveryCost: delivery.cost,
         deliveryMethod: customerInfo?.deliveryMethod ?? 'delivery',
+        deliveryUnresolved: 'unresolved' in delivery && delivery.unresolved === true,
         items,
         total,
         trackingToken,
