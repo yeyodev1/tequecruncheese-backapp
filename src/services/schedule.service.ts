@@ -11,19 +11,29 @@ import { CustomError } from '../errors/customError.error'
 /** Ecuador has no DST, but resolving through the IANA zone keeps it honest. */
 const STORE_TIMEZONE = 'America/Guayaquil'
 
+/** An hour from the environment, falling back when unset or nonsense. */
+function hourFromEnv(name: string, fallback: number): number {
+  const raw = Number(process.env[name])
+  return Number.isInteger(raw) && raw >= 0 && raw <= 24 ? raw : fallback
+}
+
 export const SCHEDULE_CONFIG = {
   timezone: STORE_TIMEZONE,
-  /** Store opens at 09:00. */
-  openHour: 9,
-  /** Store closes at 20:00 — the last bookable slot starts before this. */
-  closeHour: 20,
+  /**
+   * Opening and closing hours, from the environment so the store can change
+   * them without a deploy — and so the closed path can be exercised on a
+   * preview without shutting the real shop for the length of a test.
+   */
+  openHour: hourFromEnv('STORE_OPEN_HOUR', 9),
+  /** Closes at 20:00 by default — the last bookable slot starts before this. */
+  closeHour: hourFromEnv('STORE_CLOSE_HOUR', 20),
   /** Slots every 30 minutes. */
   slotMinutes: 30,
   /** Nothing sooner than an hour from now: the kitchen needs the lead time. */
   minLeadMinutes: 60,
   /** Nothing further out than two weeks. */
   maxDaysAhead: 14,
-} as const
+}
 
 export interface StoreLocalParts {
   year: number
