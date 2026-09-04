@@ -45,7 +45,7 @@ export async function reconcile(req: Request, res: Response, next: NextFunction)
     if (!secret || presented !== secret) {
       throw new CustomError('Unauthorized', 401)
     }
-    const result = await orderService.reconcilePendingOrders()
+    const result = await orderService.reconcilePendingOrders(req.query.debug === '1')
     res.status(200).json(result)
   } catch (err) {
     next(err)

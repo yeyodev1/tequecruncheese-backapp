@@ -222,11 +222,13 @@ const RECONCILE_NOTIFY_WINDOW_HOURS = 12
  * with a real redirect: whichever gets there first flips the status off
  * `pending`, and the other one finds nothing to do.
  */
-export async function reconcilePendingOrders(): Promise<{
+export async function reconcilePendingOrders(debug = false): Promise<{
   checked: number
   approved: number
   rejected: number
   stillPending: number
+  error?: string
+  diagnostics?: string[]
 }> {
   const now = Date.now()
   const stale = await Order.find({
@@ -240,13 +242,46 @@ export async function reconcilePendingOrders(): Promise<{
   let approved = 0
   let rejected = 0
   let stillPending = 0
+  const diagnostics: string[] = []
+  let unauthorized = false
 
   for (const order of stale) {
-    const sale = await payphoneService.findSaleByClientTxId(order.clientTransactionId)
-    // No answer means "we do not know", never "it failed" — cancelling an order
-    // on a lookup outage would reject payments the customer actually made.
+    const outcome = await payphoneService.findSaleByClientTxId(order.clientTransactionId)
+    const sale = outcome.sale
+    if (debug) {
+      diagnostics.push(
+        `${String(order._id)} ${new Date(order.createdAt).toISOString().slice(0, 10)} ` +
+          `${outcome.result} ${outcome.detail ?? ''} status=${sale?.transactionStatus ?? '-'}`,
+      )
+    }
+
+    // An outage means "we do not know", never "it failed" — cancelling an order
+    // because Payphone was unreachable would reject payments the customer
+    // actually made. A clean 404 is different: there is no sale, so the
+    // checkout was abandoned and the order can be closed.
     if (!sale?.transactionStatus) {
+      if (outcome.result === 'not-found') {
+        order.status = 'rejected'
+        await order.save()
+        rejected++
+        continue
+      }
+
+      console.warn(`[reconcile] lookup unresolved for ${order.clientTransactionId}: ${outcome.detail}`)
       stillPending++
+
+      // A 401 is about the credentials, not this order, so every remaining
+      // lookup would fail identically. The Payphone token is scoped to the
+      // payment button and cannot query transactions: that permission has to
+      // be granted on the Payphone account before this sweep can do anything.
+      if (outcome.detail?.includes('401')) {
+        unauthorized = true
+        console.error(
+          '[reconcile] aborting: the Payphone token is not authorized to query ' +
+            'transactions. Grant it transaction-query access in the Payphone panel.',
+        )
+        break
+      }
       continue
     }
 
@@ -276,7 +311,18 @@ export async function reconcilePendingOrders(): Promise<{
     stillPending++
   }
 
-  return { checked: stale.length, approved, rejected, stillPending }
+  return {
+    checked: stale.length,
+    approved,
+    rejected,
+    stillPending,
+    // Surfaced rather than logged away: without this the sweep reports a clean
+    // run while silently doing nothing at all.
+    ...(unauthorized
+      ? { error: 'payphone-token-cannot-query-transactions' as const }
+      : {}),
+    ...(debug ? { diagnostics } : {}),
+  }
 }
 
 export async function confirmOrder(body: ConfirmRequest) {
