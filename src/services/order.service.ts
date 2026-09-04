@@ -198,8 +198,15 @@ async function notifyPaymentOutcome(
 
 /** A pending order younger than this is still plausibly mid-checkout. */
 const RECONCILE_MIN_AGE_MINUTES = 3
-/** Older than this and Payphone has expired the session; leave it alone. */
-const RECONCILE_MAX_AGE_HOURS = 48
+/** How far back a sweep looks. Money stays owed however old the order is. */
+const RECONCILE_MAX_AGE_DAYS = Number(process.env.RECONCILE_MAX_AGE_DAYS ?? 45)
+/**
+ * Past this, a settled order is only recorded, never announced to the customer.
+ * Telling someone their payment failed a month after they moved on is noise;
+ * an *approved* one still alerts the team, because that is money received that
+ * nobody has acted on.
+ */
+const RECONCILE_NOTIFY_WINDOW_HOURS = 12
 
 /**
  * Settle orders whose payment completed but whose browser never came back.
@@ -226,7 +233,7 @@ export async function reconcilePendingOrders(): Promise<{
     status: 'pending',
     createdAt: {
       $lte: new Date(now - RECONCILE_MIN_AGE_MINUTES * 60_000),
-      $gte: new Date(now - RECONCILE_MAX_AGE_HOURS * 3_600_000),
+      $gte: new Date(now - RECONCILE_MAX_AGE_DAYS * 86_400_000),
     },
   }).limit(100)
 
@@ -243,6 +250,9 @@ export async function reconcilePendingOrders(): Promise<{
       continue
     }
 
+    const isRecent =
+      now - new Date(order.createdAt).getTime() < RECONCILE_NOTIFY_WINDOW_HOURS * 3_600_000
+
     if (sale.transactionStatus === 'Approved') {
       order.status = 'approved'
       if (sale.transactionId) order.payphoneTransactionId = String(sale.transactionId)
@@ -256,6 +266,9 @@ export async function reconcilePendingOrders(): Promise<{
     if (sale.transactionStatus === 'Canceled' || sale.transactionStatus === 'Cancelled') {
       order.status = 'rejected'
       await order.save()
+      // Silent for anything old: the customer abandoned this checkout weeks ago
+      // and does not need a "your payment failed" email about it today.
+      if (isRecent) await notifyPaymentOutcome(order, 'rejected')
       rejected++
       continue
     }
