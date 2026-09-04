@@ -468,7 +468,19 @@ export async function quoteFromMapsUrl(raw: string): Promise<MapsQuote> {
   // A pasted "lat,lng" needs no network round trip.
   const direct = extractCoords(raw ?? '')
   const normalized = normalizeMapsUrl(raw ?? '')
-  if (!normalized) return direct ? await finalize(raw, direct) : empty
+  if (!normalized) {
+    if (direct) return await finalize(raw, direct)
+    // Not a link at all. People paste a Plus Code ("V32W+X3Q, Av. Juan Tanca
+    // Marengo, 090509 Guayaquil" — Maps offers it right under the address) or
+    // simply type where they live. Both used to resolve to nothing and ship
+    // free; Google's geocoder reads both, so the text gets one honest try.
+    const typed = (raw ?? '').trim()
+    if (typed.length >= 6 && /[a-zA-ZÀ-ÿ0-9]/.test(typed)) {
+      const geocoded = await geocodeAddress(typed)
+      if (geocoded) return await finalize(typed, geocoded)
+    }
+    return empty
+  }
 
   // A pasted long directions URL carries both waypoints — take the destination.
   const fromUrl = DIRECTIONS_RE.test(normalized)
