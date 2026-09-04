@@ -39,12 +39,26 @@ export async function testEmail(req: Request, res: Response, next: NextFunction)
         deliveryCost: 3.5,
         deliveryMethod: 'delivery',
         items: [
-          { slug: 'tequenos-12', nombre: 'Tequeños clásicos (12 u.)', precio: 7.5, cantidad: 2 },
+          {
+            slug: 'box-tequeduo-20u',
+            nombre: 'Box TequeDuo (20u)',
+            precio: 14,
+            cantidad: 1,
+            flavorSelections: [
+              { nombre: 'Queso tradicional', grupo: 'normal', cantidad: 8 },
+              { nombre: 'Jamón con queso', grupo: 'normal', cantidad: 6 },
+              { nombre: 'Tocino con queso', grupo: 'normal', cantidad: 4 },
+              { nombre: 'Guayaba con queso', grupo: 'normal', cantidad: 2 },
+            ],
+          },
           { slug: 'salsa-tartara', nombre: 'Salsa tártara', precio: 1.5, cantidad: 1 },
         ],
-        total: 20.0,
+        total: 18.0,
         trackingToken: 'prueba-sin-pedido-real',
         orderId: 'PRUEBA',
+        // Sent to the requested address rather than the kitchen, so the exact
+        // alert can be inspected without putting a fake order in their inbox.
+        deliverTo: [to],
       })
       res.json({ ok: true, sent: 'order-alert', to, teamEmail: process.env.TEAM_EMAIL })
       return

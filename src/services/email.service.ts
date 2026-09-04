@@ -505,6 +505,8 @@ export async function sendNewOrderAlertToTeam(params: {
   trackingToken: string
   orderId: string
   scheduledFor?: Date | null
+  /** Overrides the team inbox — used to preview the real alert elsewhere. */
+  deliverTo?: string[]
 }): Promise<void> {
   const { customerEmail, customerName, items, total, trackingToken, orderId, scheduledFor } = params
   const adminUrl = `${process.env.FRONTEND_URL}/admin/dashboard`
@@ -540,7 +542,7 @@ export async function sendNewOrderAlertToTeam(params: {
   try {
     const result = await resend.emails.send({
       from: FROM_EMAIL,
-      to: TEAM_EMAILS,
+      to: params.deliverTo?.length ? params.deliverTo : TEAM_EMAILS,
       subject: `🛒 Nuevo pedido — $${total.toFixed(2)} — ${displayName}`,
       html: buildEmailWrapper(content),
     })
