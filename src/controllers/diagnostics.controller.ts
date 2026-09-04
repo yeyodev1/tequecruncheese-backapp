@@ -22,6 +22,34 @@ export async function testEmail(req: Request, res: Response, next: NextFunction)
     const to = (req.query.to as string | undefined)?.trim()
     if (!to || !to.includes('@')) throw new CustomError('A `to` address is required', 400)
 
+    // `?type=order-alert` sends the actual kitchen notification, filled with
+    // obviously-fake details. Describing the new alert is not the same as
+    // seeing it, and this is the email the store will work from every day.
+    if (req.query.type === 'order-alert') {
+      await emailService.sendNewOrderAlertToTeam({
+        customerEmail: to,
+        customerName: 'PEDIDO DE PRUEBA — no despachar',
+        customerPhone: '0999999999',
+        deliveryAddress: {
+          calle: 'Av. Francisco de Orellana y Av. Plaza Dañín',
+          barrio: 'Kennedy Norte',
+          referencia: 'Ejemplo — edificio azul, timbre 2',
+          mapsUrl: 'https://maps.app.goo.gl/5TT6s3ZbFnh71hJ89',
+        },
+        deliveryCost: 3.5,
+        deliveryMethod: 'delivery',
+        items: [
+          { slug: 'tequenos-12', nombre: 'Tequeños clásicos (12 u.)', precio: 7.5, cantidad: 2 },
+          { slug: 'salsa-tartara', nombre: 'Salsa tártara', precio: 1.5, cantidad: 1 },
+        ],
+        total: 20.0,
+        trackingToken: 'prueba-sin-pedido-real',
+        orderId: 'PRUEBA',
+      })
+      res.json({ ok: true, sent: 'order-alert', to, teamEmail: process.env.TEAM_EMAIL })
+      return
+    }
+
     const id = await emailService.sendNotificationTestEmail(to)
     res.json({ ok: true, to, id, from: process.env.EMAIL_FROM, teamEmail: process.env.TEAM_EMAIL })
   } catch (err) {
