@@ -96,8 +96,13 @@ export async function updateStatus(req: Request, res: Response, next: NextFuncti
     }
     await order.save()
 
+    // Awaited, not fired and forgotten: this runs on a serverless function that
+    // is frozen the moment the response is sent, so a dangling promise is never
+    // resumed. The same mistake elsewhere is why order notifications silently
+    // stopped arriving — every status the kitchen sets here would have gone the
+    // same way. The send swallows its own errors, so it cannot fail the update.
     if (STATUS_UPDATE_EMAIL_TRIGGERS.includes(status as OrderStatus)) {
-      void emailService.sendOrderStatusUpdateEmail(order.customerEmail, status, order.trackingToken, trimmedNote || undefined)
+      await emailService.sendOrderStatusUpdateEmail(order.customerEmail, status, order.trackingToken, trimmedNote || undefined)
     }
 
     res.json(order)
