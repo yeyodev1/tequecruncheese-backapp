@@ -139,3 +139,35 @@ export function validateScheduledFor(raw: unknown, now: Date = new Date()): Date
 
   return date
 }
+
+/**
+ * Is the store taking orders right now?
+ *
+ * The scheduled-slot rules above govern *when a customer wants their food*.
+ * This governs *when an order may be placed at all* — a different question,
+ * asked because orders landing after closing had nobody to cook them.
+ */
+export function isStoreOpen(now: Date = new Date()): boolean {
+  const { hour, minute } = storeLocalParts(now)
+  const minutesOfDay = hour * 60 + minute
+  return (
+    minutesOfDay >= SCHEDULE_CONFIG.openHour * 60 &&
+    minutesOfDay < SCHEDULE_CONFIG.closeHour * 60
+  )
+}
+
+/**
+ * Reject an order placed outside opening hours.
+ *
+ * Checked on the server because the browser's clock belongs to the customer:
+ * a device set to noon, or a tab left open since the afternoon, would sail
+ * past a front-end-only check.
+ */
+export function assertStoreOpen(now: Date = new Date()): void {
+  if (isStoreOpen(now)) return
+  throw new CustomError(
+    `Ya cerramos por hoy. Recibimos pedidos de ${SCHEDULE_CONFIG.openHour}:00 a ` +
+      `${SCHEDULE_CONFIG.closeHour}:00 (hora de Ecuador). ¡Te esperamos mañana!`,
+    409,
+  )
+}

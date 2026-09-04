@@ -101,3 +101,11 @@ export interface PayphoneConfirmResult {
   amount: number
   clientTransactionId: string
 }
+
+/** Shape of Payphone's transaction lookup (`GET /Sale?clientTxId=`). */
+export interface PayphoneSaleLookup {
+  transactionId?: number | string
+  clientTransactionId?: string
+  transactionStatus?: string
+  amount?: number
+}

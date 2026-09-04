@@ -15,12 +15,21 @@ const whitelist = [
   "https://tequecruncheese.com",
   // Netlify serves the apex and the www host; only the apex was listed, so
   // anyone landing on www got a CORS failure on every request.
-  "https://www.tequecruncheese.com"
+  "https://www.tequecruncheese.com",
+  // The storefront's own Vercel hostnames. The custom domain is what customers
+  // use, but the .vercel.app aliases are what we open to check a deploy — and
+  // they were failing every API call with a CORS error that looked like an
+  // outage.
+  "https://tequecruncheese-webpage.vercel.app",
+  "https://tequecruncheese-webpage-proyectos-de-diego.vercel.app"
 ];
+
+/** Preview deploys get a fresh hostname per build; allow the project's own. */
+const PREVIEW_ORIGIN_RE = /^https:\/\/tequecruncheese-webpage-[a-z0-9-]+\.vercel\.app$/;
 
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
-    if (!origin || whitelist.includes(origin)) {
+    if (!origin || whitelist.includes(origin) || PREVIEW_ORIGIN_RE.test(origin)) {
       callback(null, true);
     } else {
       callback(new Error("Not allowed by CORS"));

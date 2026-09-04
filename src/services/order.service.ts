@@ -62,6 +62,11 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
   const existing = await Order.findOne({ clientTransactionId })
   if (existing) throw new CustomError('Transaction already exists', 409)
 
+  // Nothing gets taken outside opening hours — an order placed at 21:00 has
+  // nobody in the kitchen to cook it. Checked before anything is written or
+  // charged, so a closed store costs the customer nothing.
+  scheduleService.assertStoreOpen()
+
   // Re-checked server-side: a stale tab could still be offering a slot that
   // has since passed, or that falls outside opening hours.
   const scheduledFor = scheduleService.validateScheduledFor(body.scheduledFor)
@@ -100,8 +105,10 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
     status: 'pending',
   })
 
-  // Link or create user account (non-blocking — failures logged, not thrown)
-  void linkOrCreateUser(customerEmail, order)
+  // Awaited, not fired and forgotten: this runs on a serverless function, and
+  // the instance is frozen the moment the response is sent. A dangling promise
+  // is simply never resumed. `linkOrCreateUser` swallows its own errors.
+  await linkOrCreateUser(customerEmail, order)
 
   try {
     const result = await payphoneService.preparePurchase({
@@ -119,23 +126,144 @@ export async function createOrderAndPrepare(body: PrepareRequest) {
     order.payWithPayPhone = result.payWithPayPhone
     await order.save()
 
-    // Email al cliente: pedido recibido, procesando pago
-    void emailService.sendOrderPendingEmail({ to: customerEmail, items, total, trackingToken, scheduledFor })
-    // Alerta interna al equipo: nuevo pedido entrante
-    void emailService.sendNewOrderAlertToTeam({
-      customerEmail,
-      items,
-      total,
-      trackingToken,
-      orderId: String(order._id),
-      scheduledFor,
-    })
+    // Both awaited before responding — see above. They are sent concurrently so
+    // the customer waits for one round trip, not two, and `allSettled` keeps a
+    // bounced address from blocking the redirect to the payment page.
+    await Promise.allSettled([
+      // Email al cliente: pedido recibido, procesando pago
+      emailService.sendOrderPendingEmail({ to: customerEmail, items, total, trackingToken, scheduledFor }),
+      // Alerta interna al equipo: nuevo pedido entrante
+      emailService.sendNewOrderAlertToTeam({
+        customerEmail,
+        customerName: customerInfo?.nombre,
+        customerPhone: customerInfo?.telefono,
+        deliveryAddress: order.deliveryAddress,
+        deliveryCost: delivery.cost,
+        deliveryMethod: customerInfo?.deliveryMethod ?? 'delivery',
+        items,
+        total,
+        trackingToken,
+        orderId: String(order._id),
+        scheduledFor,
+      }),
+    ])
 
     return { payWithPayPhone: result.payWithPayPhone }
   } catch (err) {
     await Order.findByIdAndDelete(order._id)
     throw new CustomError('Payment gateway error', 502)
   }
+}
+
+
+/**
+ * The customer and kitchen emails that follow a settled payment.
+ *
+ * Shared with the reconciler below so an order rescued from `pending` sends
+ * exactly what it would have sent on the redirect — the customer should not be
+ * able to tell that their browser never made it back.
+ */
+async function notifyPaymentOutcome(
+  order: InstanceType<typeof Order>,
+  status: 'approved' | 'rejected',
+): Promise<void> {
+  if (status !== 'approved') {
+    await emailService.sendPaymentRejectedEmail({ to: order.customerEmail })
+    return
+  }
+
+  await Promise.allSettled([
+    // Email al cliente: pago aprobado
+    emailService.sendPaymentApprovedEmail({
+      to: order.customerEmail,
+      items: order.items,
+      total: order.total,
+      trackingToken: order.trackingToken,
+    }),
+    // Alerta interna al equipo: pago confirmado, preparar pedido
+    emailService.sendPaymentConfirmedAlertToTeam({
+      customerEmail: order.customerEmail,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      deliveryAddress: order.deliveryAddress,
+      deliveryCost: order.deliveryCost,
+      deliveryMethod: order.deliveryMethod,
+      items: order.items,
+      total: order.total,
+      trackingToken: order.trackingToken,
+      orderId: String(order._id),
+    }),
+  ])
+}
+
+/** A pending order younger than this is still plausibly mid-checkout. */
+const RECONCILE_MIN_AGE_MINUTES = 3
+/** Older than this and Payphone has expired the session; leave it alone. */
+const RECONCILE_MAX_AGE_HOURS = 48
+
+/**
+ * Settle orders whose payment completed but whose browser never came back.
+ *
+ * `confirmOrder` is driven entirely by the Payphone redirect, so anything that
+ * breaks the return trip — the tab closed, the network dropped, the frontend
+ * being down for an hour — leaves a *paid* order sitting at `pending` with no
+ * email to the customer and nothing in the kitchen's inbox. That is the failure
+ * the store hit on 2026-09-01: money taken, order invisible.
+ *
+ * Run from a schedule, this asks Payphone about every stranded order and
+ * finishes the job the redirect was supposed to do. Safe to run concurrently
+ * with a real redirect: whichever gets there first flips the status off
+ * `pending`, and the other one finds nothing to do.
+ */
+export async function reconcilePendingOrders(): Promise<{
+  checked: number
+  approved: number
+  rejected: number
+  stillPending: number
+}> {
+  const now = Date.now()
+  const stale = await Order.find({
+    status: 'pending',
+    createdAt: {
+      $lte: new Date(now - RECONCILE_MIN_AGE_MINUTES * 60_000),
+      $gte: new Date(now - RECONCILE_MAX_AGE_HOURS * 3_600_000),
+    },
+  }).limit(100)
+
+  let approved = 0
+  let rejected = 0
+  let stillPending = 0
+
+  for (const order of stale) {
+    const sale = await payphoneService.findSaleByClientTxId(order.clientTransactionId)
+    // No answer means "we do not know", never "it failed" — cancelling an order
+    // on a lookup outage would reject payments the customer actually made.
+    if (!sale?.transactionStatus) {
+      stillPending++
+      continue
+    }
+
+    if (sale.transactionStatus === 'Approved') {
+      order.status = 'approved'
+      if (sale.transactionId) order.payphoneTransactionId = String(sale.transactionId)
+      await order.save()
+      await notifyPaymentOutcome(order, 'approved')
+      approved++
+      console.log(`[reconcile] recovered paid order ${order._id} (${order.clientTransactionId})`)
+      continue
+    }
+
+    if (sale.transactionStatus === 'Canceled' || sale.transactionStatus === 'Cancelled') {
+      order.status = 'rejected'
+      await order.save()
+      rejected++
+      continue
+    }
+
+    stillPending++
+  }
+
+  return { checked: stale.length, approved, rejected, stillPending }
 }
 
 export async function confirmOrder(body: ConfirmRequest) {
@@ -165,25 +293,7 @@ export async function confirmOrder(body: ConfirmRequest) {
   order.payphoneTransactionId = id
   await order.save()
 
-  if (newStatus === 'approved') {
-    // Email al cliente: pago aprobado
-    void emailService.sendPaymentApprovedEmail({
-      to: order.customerEmail,
-      items: order.items,
-      total: order.total,
-      trackingToken: order.trackingToken,
-    })
-    // Alerta interna al equipo: pago confirmado, preparar pedido
-    void emailService.sendPaymentConfirmedAlertToTeam({
-      customerEmail: order.customerEmail,
-      items: order.items,
-      total: order.total,
-      trackingToken: order.trackingToken,
-      orderId: String(order._id),
-    })
-  } else {
-    void emailService.sendPaymentRejectedEmail({ to: order.customerEmail })
-  }
+  await notifyPaymentOutcome(order, newStatus)
 
   return {
     success: newStatus === 'approved',

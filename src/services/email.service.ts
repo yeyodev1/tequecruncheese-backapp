@@ -57,6 +57,62 @@ function buildItemsTable(items: CartItem[]): string {
     </table>`
 }
 
+/**
+ * Contact and address block for the internal alerts.
+ *
+ * The team alert used to carry only an email address, so a confirmed order gave
+ * nobody a phone to call or a street to ride to — the answer to "no sé cómo ver
+ * el pedido" was to open the admin panel and hope. Everything needed to
+ * dispatch now travels in the notification itself.
+ */
+function buildDispatchBlock(params: {
+  customerEmail: string
+  customerName?: string
+  customerPhone?: string
+  deliveryAddress?: { calle?: string; barrio?: string; referencia?: string; mapsUrl?: string }
+  deliveryCost?: number
+  deliveryMethod?: 'delivery' | 'pickup'
+}): string {
+  const { customerEmail, customerName, customerPhone, deliveryAddress, deliveryCost, deliveryMethod } = params
+
+  const row = (label: string, value: string) => `
+    <tr>
+      <td style="padding:4px 0;font-size:13px;color:#777;width:96px;vertical-align:top;">${label}</td>
+      <td style="padding:4px 0;font-size:14px;color:${ACCENT_COLOR};font-weight:600;">${value}</td>
+    </tr>`
+
+  const phoneRow = customerPhone
+    ? row('Teléfono', `<a href="tel:${customerPhone}" style="color:${ACCENT_COLOR};">${customerPhone}</a>
+        &nbsp;·&nbsp;
+        <a href="https://wa.me/${customerPhone.replace(/\D/g, '')}" style="color:#25d366;">WhatsApp</a>`)
+    : ''
+
+  const isPickup = deliveryMethod === 'pickup'
+  const addressRows = isPickup
+    ? row('Entrega', 'Retira en el local')
+    : [
+        deliveryAddress?.calle ? row('Dirección', deliveryAddress.calle) : '',
+        deliveryAddress?.barrio ? row('Sector', deliveryAddress.barrio) : '',
+        deliveryAddress?.referencia ? row('Referencia', deliveryAddress.referencia) : '',
+        deliveryAddress?.mapsUrl
+          ? row('Mapa', `<a href="${deliveryAddress.mapsUrl}" style="color:#1a73e8;">Abrir ubicación</a>`)
+          : '',
+        typeof deliveryCost === 'number'
+          ? row('Envío', deliveryCost > 0 ? `$${deliveryCost.toFixed(2)}` : 'Por coordinar')
+          : '',
+      ].join('')
+
+  return `
+    <div style="background:#f9f5ee;border-radius:8px;padding:14px 18px;margin:0 0 20px;">
+      <table style="width:100%;border-collapse:collapse;">
+        ${row('Cliente', customerName ?? customerEmail)}
+        ${row('Correo', customerEmail)}
+        ${phoneRow}
+        ${addressRows}
+      </table>
+    </div>`
+}
+
 function buildEmailWrapper(content: string): string {
   return `
     <!DOCTYPE html>
@@ -420,6 +476,10 @@ export async function sendAdminCustomEmail(params: {
 export async function sendNewOrderAlertToTeam(params: {
   customerEmail: string
   customerName?: string
+  customerPhone?: string
+  deliveryAddress?: { calle?: string; barrio?: string; referencia?: string; mapsUrl?: string }
+  deliveryCost?: number
+  deliveryMethod?: 'delivery' | 'pickup'
   items: CartItem[]
   total: number
   trackingToken: string
@@ -437,11 +497,7 @@ export async function sendNewOrderAlertToTeam(params: {
     </h2>
     <p style="margin:0 0 20px;color:#777;font-size:13px;">ID: ${orderId}</p>
 
-    <div style="background:#f9f5ee;border-radius:8px;padding:14px 18px;margin:0 0 20px;">
-      <p style="margin:0 0 4px;font-size:13px;color:#777;">Cliente</p>
-      <p style="margin:0;font-size:15px;font-weight:700;color:${ACCENT_COLOR};">${displayName}</p>
-      <p style="margin:2px 0 0;font-size:13px;color:#555;">${customerEmail}</p>
-    </div>
+    ${buildDispatchBlock(params)}
 
     ${buildScheduleBanner(scheduledFor)}
     ${buildItemsTable(items)}
@@ -479,6 +535,11 @@ export async function sendNewOrderAlertToTeam(params: {
  */
 export async function sendPaymentConfirmedAlertToTeam(params: {
   customerEmail: string
+  customerName?: string
+  customerPhone?: string
+  deliveryAddress?: { calle?: string; barrio?: string; referencia?: string; mapsUrl?: string }
+  deliveryCost?: number
+  deliveryMethod?: 'delivery' | 'pickup'
   items: CartItem[]
   total: number
   trackingToken: string
@@ -486,6 +547,7 @@ export async function sendPaymentConfirmedAlertToTeam(params: {
 }): Promise<void> {
   const { customerEmail, items, total, trackingToken, orderId } = params
   const adminUrl = `${process.env.FRONTEND_URL}/admin/dashboard`
+  const trackingUrl = `${process.env.FRONTEND_URL}/pedido/${trackingToken}`
 
   const content = `
     <div style="text-align:center;margin-bottom:20px;">
@@ -496,10 +558,7 @@ export async function sendPaymentConfirmedAlertToTeam(params: {
     </h2>
     <p style="margin:0 0 20px;color:#777;font-size:13px;text-align:center;">ID: ${orderId}</p>
 
-    <div style="background:#f0fff4;border-radius:8px;padding:14px 18px;margin:0 0 20px;">
-      <p style="margin:0 0 4px;font-size:13px;color:#777;">Cliente</p>
-      <p style="margin:0;font-size:15px;font-weight:700;color:#22543d;">${customerEmail}</p>
-    </div>
+    ${buildDispatchBlock(params)}
 
     ${buildItemsTable(items)}
 
@@ -511,6 +570,10 @@ export async function sendPaymentConfirmedAlertToTeam(params: {
       <a href="${adminUrl}"
          style="display:inline-block;background:${ACCENT_COLOR};color:${PRIMARY_COLOR};text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:15px;">
         Gestionar pedido en Admin
+      </a>
+      <a href="${trackingUrl}"
+         style="display:inline-block;background:#f9f5ee;color:${ACCENT_COLOR};text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:700;font-size:14px;border:1px solid ${ACCENT_COLOR};margin-left:8px;">
+        Ver tracking
       </a>
     </div>`
 

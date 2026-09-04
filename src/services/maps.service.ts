@@ -331,6 +331,75 @@ async function osrmDrivingKm(a: Coords, b: Coords): Promise<number | null> {
   }
 }
 
+/**
+ * The text address a Maps link carries when it carries no coordinates.
+ *
+ * Links shared from the Maps app ("Compartir" on a place) redirect to
+ * `maps.google.com/?q=<place name, street, city>&ftid=...` — a *name*, not a
+ * pin. Every coordinate pattern above misses it, and the 800 KB HTML behind it
+ * holds no `!3d!4d` either, so these links resolved to "no coords" and the
+ * order shipped for $0. They are the single most common way a customer shares
+ * an address, so the text is worth geocoding.
+ */
+export function extractPlaceQuery(url: string): string | null {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+
+  for (const key of ['q', 'query', 'destination', 'daddr']) {
+    const raw = parsed.searchParams.get(key)
+    if (!raw) continue
+    const value = raw.replace(/^loc:/i, '').trim()
+    // A coordinate pair is the caller's job, not the geocoder's.
+    if (!value || BARE_COORDS_RE.test(value)) continue
+    // Needs at least one letter to be an address rather than a stray id.
+    if (!/[a-zA-ZÀ-ÿ]/.test(value)) continue
+    return value
+  }
+
+  return null
+}
+
+/**
+ * Coordinates for a written address, via Google Geocoding.
+ *
+ * Biased to the store's region so a bare "Alhambra" resolves to the mall in
+ * Samborondón rather than the palace in Granada, and the result is still put
+ * through the Ecuador bounding box before it can price anything.
+ */
+async function geocodeAddress(query: string): Promise<Coords | null> {
+  const key = process.env.GOOGLE_MAPS_API_KEY
+  if (!key) return null
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 5000)
+  try {
+    const url =
+      'https://maps.googleapis.com/maps/api/geocode/json' +
+      `?address=${encodeURIComponent(query)}` +
+      '&region=ec&language=es' +
+      `&bounds=${EC_BBOX.minLat},${EC_BBOX.minLng}|${EC_BBOX.maxLat},${EC_BBOX.maxLng}` +
+      `&key=${key}`
+    const response = await fetch(url, { signal: controller.signal })
+    if (!response.ok) return null
+    const data = (await response.json()) as {
+      status?: string
+      results?: Array<{ geometry?: { location?: { lat?: number; lng?: number } } }>
+    }
+    if (data.status !== 'OK') return null
+    const loc = data.results?.[0]?.geometry?.location
+    if (typeof loc?.lat !== 'number' || typeof loc?.lng !== 'number') return null
+    return isPlausible(loc.lat, loc.lng) ? { lat: loc.lat, lng: loc.lng } : null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export function haversineKm(a: Coords, b: Coords): number {
   const R = 6371
   const toRad = (v: number) => (v * Math.PI) / 180
@@ -402,6 +471,10 @@ export async function quoteFromMapsUrl(raw: string): Promise<MapsQuote> {
   if (fromUrl) return await finalize(normalized, fromUrl)
 
   let lastUrl = normalized
+  // Held from the first redirect that carried a written address, so a link with
+  // no coordinates anywhere still has something to geocode at the end.
+  let placeQuery: string | null = extractPlaceQuery(normalized)
+
   for (const userAgent of USER_AGENTS) {
     try {
       const { finalUrl, body } = await followAndRead(normalized, userAgent)
@@ -412,12 +485,23 @@ export async function quoteFromMapsUrl(raw: string): Promise<MapsQuote> {
         ? extractDestinationCoords(finalUrl, body)
         : extractCoords(finalUrl) ?? extractCoords(body)
       if (coords) return await finalize(finalUrl, coords)
+      placeQuery ??= extractPlaceQuery(finalUrl)
     } catch {
       // Timeout or network error — fall through to the next user agent.
     }
   }
 
-  return direct ? await finalize(lastUrl, direct) : { ...empty, resolvedUrl: lastUrl }
+  if (direct) return await finalize(lastUrl, direct)
+
+  // Last resort: the link named a place instead of pinning one. Geocoding the
+  // name is what stops these orders from shipping free — they used to fall
+  // through to "unresolved", which prices delivery at $0.
+  if (placeQuery) {
+    const geocoded = await geocodeAddress(placeQuery)
+    if (geocoded) return await finalize(lastUrl, geocoded)
+  }
+
+  return { ...empty, resolvedUrl: lastUrl }
 }
 
 async function finalize(resolvedUrl: string, coords: Coords | null): Promise<MapsQuote> {

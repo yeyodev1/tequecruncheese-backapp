@@ -30,3 +30,24 @@ export async function confirm(req: Request, res: Response, next: NextFunction) {
     next(err)
   }
 }
+
+/**
+ * Settle orders left stranded on `pending` by a broken payment redirect.
+ *
+ * Runs on a schedule (see `crons` in vercel.json) and is also safe to hit by
+ * hand when the store reports a payment it cannot see. Guarded by a shared
+ * secret rather than the admin session, because the caller is Vercel's cron.
+ */
+export async function reconcile(req: Request, res: Response, next: NextFunction) {
+  try {
+    const secret = process.env.CRON_SECRET
+    const presented = req.headers.authorization?.replace(/^Bearer /i, '')
+    if (!secret || presented !== secret) {
+      throw new CustomError('Unauthorized', 401)
+    }
+    const result = await orderService.reconcilePendingOrders()
+    res.status(200).json(result)
+  } catch (err) {
+    next(err)
+  }
+}

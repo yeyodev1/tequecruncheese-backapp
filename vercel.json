@@ -11,5 +11,11 @@
       "source": "/(.*)",
       "destination": "src/index.ts"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/payphone/reconcile",
+      "schedule": "*/10 * * * *"
+    }
   ]
 }
