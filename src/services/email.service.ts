@@ -6,8 +6,18 @@ const resend = new Resend(process.env.RESEND_KEY)
 
 // Usar una dirección real (pedidos@tequecruncheese.com) — NO noreply, mejora entregabilidad
 const FROM_EMAIL = process.env.EMAIL_FROM ?? 'Tequecruncheese <pedidos@tequecruncheese.com>'
-// Correo del equipo que recibe notificaciones internas
-const TEAM_EMAIL = process.env.TEAM_EMAIL ?? 'pedidos@tequecruncheese.com'
+/**
+ * Who gets the internal order alerts. Comma-separated, because the store is run
+ * from more than one inbox and a single missed notification is the whole
+ * problem this exists to prevent.
+ */
+const TEAM_EMAILS = (process.env.TEAM_EMAIL ?? 'pedidos@tequecruncheese.com')
+  .split(',')
+  .map((address) => address.trim())
+  .filter(Boolean)
+
+/** Kept for the diagnostic endpoint, which reports the configured value back. */
+const TEAM_EMAIL = TEAM_EMAILS.join(', ')
 
 const ACCENT_COLOR = '#2d1b00'
 const PRIMARY_COLOR = '#fed47f'
@@ -530,7 +540,7 @@ export async function sendNewOrderAlertToTeam(params: {
   try {
     const result = await resend.emails.send({
       from: FROM_EMAIL,
-      to: TEAM_EMAIL,
+      to: TEAM_EMAILS,
       subject: `🛒 Nuevo pedido — $${total.toFixed(2)} — ${displayName}`,
       html: buildEmailWrapper(content),
     })
@@ -591,7 +601,7 @@ export async function sendPaymentConfirmedAlertToTeam(params: {
   try {
     const result = await resend.emails.send({
       from: FROM_EMAIL,
-      to: TEAM_EMAIL,
+      to: TEAM_EMAILS,
       subject: `✅ Pago confirmado — $${total.toFixed(2)} — ${customerEmail}`,
       html: buildEmailWrapper(content),
     })
@@ -599,4 +609,49 @@ export async function sendPaymentConfirmedAlertToTeam(params: {
   } catch (err) {
     console.error('[email] sendPaymentConfirmedAlertToTeam failed:', err)
   }
+}
+
+/**
+ * Prove that mail actually leaves production.
+ *
+ * Deliverability failures here are invisible from the outside — the store just
+ * stops hearing about orders, which is how a paid order went unnoticed for two
+ * hours on 2026-09-01. This sends the real thing through the real path (the
+ * Vercel function, the configured FROM, Resend) so the answer is not inferred
+ * from code but observed in an inbox. Returns Resend's id, or throws.
+ */
+export async function sendNotificationTestEmail(to: string): Promise<string> {
+  const content = `
+    <h2 style="margin:0 0 12px;color:${ACCENT_COLOR};font-size:20px;font-weight:800;">
+      Prueba de notificaciones
+    </h2>
+    <p style="margin:0 0 16px;color:#555;font-size:15px;line-height:1.6;">
+      Si estás leyendo esto, los avisos de pedidos ya funcionan.
+    </p>
+    <div style="background:#f9f5ee;border-radius:8px;padding:16px 20px;margin:0 0 20px;">
+      <p style="margin:0 0 8px;font-size:14px;color:#333;line-height:1.6;">
+        <strong>Qué estaba fallando:</strong> los correos se enviaban, pero el
+        servidor se apagaba antes de alcanzar a mandarlos. Por eso el pedido del
+        1 de septiembre entró y se cobró bien, pero nunca llegó el aviso.
+      </p>
+      <p style="margin:0;font-size:14px;color:#333;line-height:1.6;">
+        <strong>Qué cambia:</strong> cada pedido llega ahora con el nombre, el
+        teléfono con botón de WhatsApp, la dirección, el enlace al mapa y el
+        costo de envío, para poder despachar desde el mismo correo.
+      </p>
+    </div>
+    <p style="margin:0;font-size:13px;color:#888;">
+      Enviado desde ${FROM_EMAIL} · destinatario configurado: ${TEAM_EMAIL}
+    </p>`
+
+  const result = await resend.emails.send({
+    from: FROM_EMAIL,
+    to,
+    subject: '✅ Prueba — notificaciones de pedidos Tequecruncheese',
+    html: buildEmailWrapper(content),
+  })
+  if (result.error) {
+    throw new Error(`${result.error.name}: ${result.error.message}`)
+  }
+  return result.data?.id ?? 'sent'
 }

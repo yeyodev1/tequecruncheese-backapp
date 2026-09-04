@@ -6,6 +6,7 @@ import authRouter from "./auth.routes";
 import productRouter from "./product.routes";
 import categoryRouter from "./category.routes";
 import * as mapsService from "../services/maps.service";
+import { testEmail } from "../controllers/diagnostics.controller";
 import { SCHEDULE_CONFIG, isStoreOpen } from "../services/schedule.service";
 
 function routerApi(app: Application) {
@@ -13,6 +14,9 @@ function routerApi(app: Application) {
   app.use("/api", router);
 
   router.use("/payphone", payphoneRouter);
+
+  // Verify mail delivery from production without placing a real order.
+  router.get("/diagnostics/test-email", testEmail);
   router.use("/orders", orderRouter);
   router.use("/admin", adminRouter);
   router.use("/auth", authRouter);
